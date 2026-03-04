@@ -1,4 +1,4 @@
-const APP_VERSION = "6.0.7";
+const APP_VERSION = "6.1";
 
 /* === Leaflet kompat réteg MapLibre-hez (csak a CityMap által használt minimál API) ===
    Cél: a régi kód nagy részét változtatás nélkül futtatni Leaflet nélkül. */
@@ -222,7 +222,7 @@ function getVisibleMarkerBounds() {
     }
   }
   if (latlngs.length === 0) return null;
-  return L.latLngBounds(latlngs);
+  return CM.latLngBounds(latlngs);
 }
 
 function fitMapToVisibleMarkers() {
@@ -474,7 +474,7 @@ function iconForMarker(m, zoom) {
   const meta = m && Number.isFinite(Number(m.typeId)) ? _typeMetaById.get(Number(m.typeId)) : null;
   const color = meta && meta.color ? meta.color : "#6b7280";
 
-  return new L.Icon({
+  return new CM.Icon({
     iconUrl: markerSvgDataUrl(color),
     iconSize: size,
     iconAnchor: anchor,
@@ -1117,7 +1117,7 @@ async function ensureMyLocationMarker(lat, lng, fetchAddressOnce = false) {
   }
 
 if (!myLocationMarker) {
-    myLocationMarker = L.marker(ll, { icon: myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg) }).addTo(map);
+    myLocationMarker = CM.marker(ll, { icon: myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg) }).addTo(map);
     myLocationMarker.bindPopup(`<b>Saját hely</b><br>${escapeHtml(myLocationAddressText)}`);
   } else {
     animateMarkerTo(myLocationMarker, lat, lng, GPS_MARKER_ANIM_MS);
@@ -1561,7 +1561,7 @@ async function getMarker(id) {
   return all.find(x => x.id === id) || null;
 }
 
-function addMarkerToMap(m) {  const mk = L.marker([m.lat, m.lng], { draggable: false, icon: iconForMarker(m, map.getZoom()) }).addTo(map);
+function addMarkerToMap(m) {  const mk = CM.marker([m.lat, m.lng], { draggable: false, icon: iconForMarker(m, map.getZoom()) }).addTo(map);
 mk.__data = m;
   mk.bindPopup(popupHtml(m));
   wirePopupDelete(mk, m.id);
@@ -2036,7 +2036,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     map.easeTo({ center: [lng, lat], duration: dur });
   };
 
-  // fitBounds kompat (L.latLngBounds-ból)
+  // fitBounds kompat (CM.latLngBounds-ból)
   const _fitBounds = map.fitBounds.bind(map);
   map.fitBounds = (b, opts = {}) => {
     try {
@@ -2634,7 +2634,7 @@ function resizedIconForMarker(data, zoom) {
 function userIconForZoom(zoom) {
   const scale = markerScaleForZoom(zoom);
   const size = 28 * scale;
-  return L.icon({
+  return CM.icon({
     iconUrl: "./icons/user.png",
     iconSize: [size, size],
     iconAnchor: [size / 2, size * 0.9],
@@ -2647,10 +2647,10 @@ function myLocArrowIconForZoomHeading(zoom, headingDeg) {
   const scale = markerScaleForZoom(zoom);
   const size = 38 * scale;
 
-  // L.divIcon: az IMG forgatása inline style-lal történik (Leaflet alap, nincs plugin).
+  // CM.divIcon: az IMG forgatása inline style-lal történik (Leaflet alap, nincs plugin).
   const rot = (typeof headingDeg === "number" && isFinite(headingDeg)) ? headingDeg : 0;
 
-  return L.divIcon({
+  return CM.divIcon({
     className: "my-loc-arrow-wrap",
     html:
       `<img class="my-loc-arrow" src="./icons/arrow.svg" ` +
@@ -2949,7 +2949,7 @@ function fitMapToMarkersByIds(idsToShow) {
     return;
   }
 
-  const bounds = L.latLngBounds(latlngs);
+  const bounds = CM.latLngBounds(latlngs);
   map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18, animate: true });
 }
 

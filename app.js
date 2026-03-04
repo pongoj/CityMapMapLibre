@@ -1,13 +1,10 @@
-const APP_VERSION = "6.0.8";
+const APP_VERSION = "6.1";
 
-/* === Leaflet kompat réteg MapLibre-hez (csak a CityMap által használt minimál API) ===
-   Cél: a régi kód nagy részét változtatás nélkül futtatni Leaflet nélkül. */
+/* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
-  if (window.L) return;
+  if (window.CM) return;
 
-  class Icon {
-    constructor(opts){ Object.assign(this, opts || {}); }
-  }
+  class Icon { constructor(opts){ Object.assign(this, opts || {}); } }
 
   class LatLngBounds {
     constructor(latlngs){
@@ -39,6 +36,7 @@ const APP_VERSION = "6.0.8";
       this._el.className = "cm-ml-marker";
       this._el.style.position = "relative";
       this._el.style.willChange = "transform";
+      this._el.style.pointerEvents = "auto";
 
       this._el.addEventListener("click", (ev) => {
         try { ev.preventDefault(); } catch(_){}
@@ -81,7 +79,7 @@ const APP_VERSION = "6.0.8";
         this._el.appendChild(img);
       }
 
-      // Anchor-t MapLibre offsettel kezeljük (nem DOM transformmal)
+      // Anchor offset MapLibre-hez (NE transform)
       this._offset = [-anchor[0], -anchor[1]];
     }
 
@@ -102,7 +100,6 @@ const APP_VERSION = "6.0.8";
     remove(){ try { this._popup && this._popup.remove(); } catch(_){} try { this._gl.remove(); } catch(_){} return this; }
 
     getLatLng(){ const ll = this._gl.getLngLat(); return { lat: ll.lat, lng: ll.lng }; }
-
     setLatLng(latlng){
       const lat = Array.isArray(latlng) ? latlng[0] : latlng.lat;
       const lng = Array.isArray(latlng) ? latlng[1] : latlng.lng;
@@ -111,12 +108,7 @@ const APP_VERSION = "6.0.8";
       return this;
     }
 
-    setIcon(icon){
-      this._icon = icon;
-      this._applyIcon();
-      this._rebuildMarkerIfNeeded();
-      return this;
-    }
+    setIcon(icon){ this._icon = icon; this._applyIcon(); this._rebuildMarkerIfNeeded(); return this; }
 
     bindPopup(html){
       const offset = (this._icon && this._icon.popupAnchor) ? this._icon.popupAnchor : [0, -25];
@@ -125,6 +117,7 @@ const APP_VERSION = "6.0.8";
       return this;
     }
 
+    getPopup(){ return this._popup; }
     setPopupContent(html){ if (this._popup) this._popup.setHTML(html || ""); return this; }
 
     openPopup(){
@@ -144,7 +137,7 @@ const APP_VERSION = "6.0.8";
     }
   }
 
-  window.L = {
+  window.CM = {
     Icon,
     icon: (opts) => new Icon(opts),
     divIcon: (opts) => new Icon(opts),
@@ -153,6 +146,9 @@ const APP_VERSION = "6.0.8";
     point: (x,y) => ({x,y}),
   };
 })();
+
+
+
 
 
 // Szűrés táblázat kijelölés (több sor is kijelölhető)
@@ -222,7 +218,7 @@ function getVisibleMarkerBounds() {
     }
   }
   if (latlngs.length === 0) return null;
-  return L.latLngBounds(latlngs);
+  return CM.latLngBounds(latlngs);
 }
 
 function fitMapToVisibleMarkers() {
@@ -474,7 +470,7 @@ function iconForMarker(m, zoom) {
   const meta = m && Number.isFinite(Number(m.typeId)) ? _typeMetaById.get(Number(m.typeId)) : null;
   const color = meta && meta.color ? meta.color : "#6b7280";
 
-  return new L.Icon({
+  return new CM.Icon({
     iconUrl: markerSvgDataUrl(color),
     iconSize: size,
     iconAnchor: anchor,
@@ -698,48 +694,15 @@ function updateMyLocFabVisibility() {
   }
 }
 
-// v5.42.2: Leaflet térkép forgatás (haladási irány mód)
-// Leaflet core-ban nincs natív map-rotation, ezért egy wrapper DIV-et teszünk a
+// v5.42.2: Map térkép forgatás (haladási irány mód)
+// Map core-ban nincs natív map-rotation, ezért egy wrapper DIV-et teszünk a
 // leaflet-map-pane köré, és azt forgatjuk CSS transform-mal.
 // Megjegyzés: kattintás (marker felvétel) esetén a lat/lng-et korrigálni kell,
 // ezért a map click eseménynél rotatedClickLatLng() van használva.
 let rotateWrapper = null;
 let mapBearingDeg = 0; // CSS rotate (fok) a wrapperen
 
-function initRotateWrapperIfNeeded(){
-  try {
-    // v6.x MapLibre: NEM használunk CSS rotate wrappert (csak MapLibre bearing-et), különben a markerek/click elcsúszik.
-    if (map && typeof map.getBearing === "function") return;
-
-    if (!map || !map.getContainer) return;
-    const container = map.getContainer();
-    if (!container) return;
-    const mapPane = container.querySelector(".leaflet-map-pane");
-    if (!mapPane) return;
-
-    // már be van csomagolva?
-    if (mapPane.parentElement && mapPane.parentElement.classList && mapPane.parentElement.classList.contains("leaflet-rotate-wrapper")) {
-      rotateWrapper = mapPane.parentElement;
-      return;
-    }
-
-    const w = document.createElement("div");
-    w.className = "leaflet-rotate-wrapper";
-    w.style.position = "absolute";
-    w.style.top = "0";
-    w.style.left = "0";
-    w.style.width = "100%";
-    w.style.height = "100%";
-    w.style.transformOrigin = "50% 50%";
-    w.style.willChange = "transform";
-
-    container.insertBefore(w, mapPane);
-    w.appendChild(mapPane);
-    rotateWrapper = w;
-  } catch (e) {
-    console.warn("rotate wrapper init failed", e);
-  }
-}
+function initRotateWrapperIfNeeded(){ /* MapLibre: CSS rotate wrapper disabled */ }
 
 function setMapBearingDeg(targetDeg){
   // DEPRECATED (v5.42.3): a tényleges forgatást egy időalapú animátor végzi
@@ -1120,7 +1083,7 @@ async function ensureMyLocationMarker(lat, lng, fetchAddressOnce = false) {
   }
 
 if (!myLocationMarker) {
-    myLocationMarker = L.marker(ll, { icon: myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg) }).addTo(map);
+    myLocationMarker = CM.marker(ll, { icon: myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg) }).addTo(map);
     myLocationMarker.bindPopup(`<b>Saját hely</b><br>${escapeHtml(myLocationAddressText)}`);
   } else {
     animateMarkerTo(myLocationMarker, lat, lng, GPS_MARKER_ANIM_MS);
@@ -1128,7 +1091,7 @@ if (!myLocationMarker) {
       myLocationMarker.setIcon(myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg));
     } catch (_) {}
     if (myLocationMarker.getPopup()) {
-      myLocationMarker.getPopup().setContent(
+      myLocationMarker.getPopup().setHTML(
         `<b>Saját hely</b><br>${escapeHtml(myLocationAddressText)}`
       );
     }
@@ -1564,7 +1527,7 @@ async function getMarker(id) {
   return all.find(x => x.id === id) || null;
 }
 
-function addMarkerToMap(m) {  const mk = L.marker([m.lat, m.lng], { draggable: false, icon: iconForMarker(m, map.getZoom()) }).addTo(map);
+function addMarkerToMap(m) {  const mk = CM.marker([m.lat, m.lng], { draggable: false, icon: iconForMarker(m, map.getZoom()) }).addTo(map);
 mk.__data = m;
   mk.bindPopup(popupHtml(m));
   wirePopupDelete(mk, m.id);
@@ -2020,7 +1983,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // MapLibre zoom vezérlő (a saját UI gombok mellett)
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
 
-  // Leaflet-kompatibilis segédfüggvények a meglévő kódrészekhez
+  // Map-kompatibilis segédfüggvények a meglévő kódrészekhez
   map.getSize = () => {
     const c = map.getContainer();
     return { x: c.clientWidth || 0, y: c.clientHeight || 0 };
@@ -2040,7 +2003,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     return { lat: ll.lat, lng: ll.lng };
   };
 
-  // Leaflet setView/panTo kompat
+  // Map setView/panTo kompat
   map.setView = (latlng, zoom, opts = {}) => {
     const lat = Array.isArray(latlng) ? latlng[0] : latlng.lat;
     const lng = Array.isArray(latlng) ? latlng[1] : latlng.lng;
@@ -2054,7 +2017,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     map.easeTo({ center: [lng, lat], duration: dur });
   };
 
-  // fitBounds kompat (L.latLngBounds-ból)
+  // fitBounds kompat (CM.latLngBounds-ból)
   const _fitBounds = map.fitBounds.bind(map);
   map.fitBounds = (b, opts = {}) => {
     try {
@@ -2070,7 +2033,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // map.removeLayer kompat (marker wrapperhez)
   map.removeLayer = (layer) => { try { if (layer && typeof layer.remove === "function") layer.remove(); } catch (_) {} };
 
-  // Események: Leaflet-szerű click objektum, ahol kell
+  // Események: Map-szerű click objektum, ahol kell
   const _on = map.on.bind(map);
   map.on = (evt, handler) => {
     if (evt === "click") {
@@ -2652,7 +2615,7 @@ function resizedIconForMarker(data, zoom) {
 function userIconForZoom(zoom) {
   const scale = markerScaleForZoom(zoom);
   const size = 28 * scale;
-  return L.icon({
+  return CM.icon({
     iconUrl: "./icons/user.png",
     iconSize: [size, size],
     iconAnchor: [size / 2, size * 0.9],
@@ -2665,10 +2628,10 @@ function myLocArrowIconForZoomHeading(zoom, headingDeg) {
   const scale = markerScaleForZoom(zoom);
   const size = 38 * scale;
 
-  // L.divIcon: az IMG forgatása inline style-lal történik (Leaflet alap, nincs plugin).
+  // CM.divIcon: az IMG forgatása inline style-lal történik (Map alap, nincs plugin).
   const rot = (typeof headingDeg === "number" && isFinite(headingDeg)) ? headingDeg : 0;
 
-  return L.divIcon({
+  return CM.divIcon({
     className: "my-loc-arrow-wrap",
     html:
       `<img class="my-loc-arrow" src="./icons/arrow.svg" ` +
@@ -2967,7 +2930,7 @@ function fitMapToMarkersByIds(idsToShow) {
     return;
   }
 
-  const bounds = L.latLngBounds(latlngs);
+  const bounds = CM.latLngBounds(latlngs);
   map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18, animate: true });
 }
 
@@ -4099,11 +4062,8 @@ async function refreshFilterData() {
 }
 
 
-// === v6.0.1 MapLibre: nav bearing és kattintás korrekció (Leaflet rotate wrapper helyett) ===
-function rotatedClickLatLng(e){
-  // MapLibre esetén a click esemény már a valódi lat/lng-et adja; nincs CSS-rotáció.
-  return e && e.latlng ? e.latlng : { lat: 0, lng: 0 };
-}
+// === v6.0.1 MapLibre: nav bearing és kattintás korrekció (Map rotate wrapper helyett) ===
+function rotatedClickLatLng(e){ return (e && e.latlng) ? e.latlng : { lat: 0, lng: 0 }; }
 
 let __cm_nav_bearing_raf = null;
 function scheduleApplyNavBearing(){
