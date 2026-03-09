@@ -1,4 +1,4 @@
-const APP_VERSION = "6.3.1";
+const APP_VERSION = "6.3.2";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -1495,11 +1495,13 @@ function buildMarkersFeatureCollection({ recalcColor = false } = {}){
 
 async function ensureMarkersLayer(){
   if (!map) return;
-  try {
-    if (typeof map.loaded === 'function' && !map.loaded()) {
-      await new Promise((resolve) => map.on('load', resolve));
-    }
-  } catch (_) {}
+
+  // FONTOS: MapLibre-ben a map.loaded() nem megbizhato jelzes arra,
+  // hogy mar elmult-e a 'load' event. Ha a load mar lefutott, de loaded()
+  // meg false, akkor az await-es varakozas orokre beragadhat, es emiatt
+  // NEM kotodnek fel a gombok / nem toltenek be a markerek.
+  // Ezert itt "probald meg" alapon hozunk letre mindent, es ha a stilus
+  // meg nincs kesz, akkor egyszeri ujraproba load utan.
 
   try {
     if (map.getSource && map.getSource(MARKERS_SOURCE_ID)) return;
@@ -1538,8 +1540,26 @@ async function ensureMarkersLayer(){
       }
     });
 
+    // Ha mar vannak betoltott markerek, azonnal rajzoljuk ki.
+    try { refreshMarkersSource({ recalcColor: true }); } catch (_) { try { refreshMarkersSource(); } catch (_) {} }
+
   } catch (err) {
-    console.error('ensureMarkersLayer failed', err);
+    // Tipikus ok: "Style is not done loading" – ilyenkor load utan ujraproba.
+    console.warn('ensureMarkersLayer deferred', err);
+    try {
+      if (!ensureMarkersLayer.__retryScheduled) {
+        ensureMarkersLayer.__retryScheduled = true;
+        const retry = () => {
+          ensureMarkersLayer.__retryScheduled = false;
+          ensureMarkersLayer().catch(() => {});
+        };
+        if (map && typeof map.once === 'function') map.once('load', retry);
+        else if (map && typeof map.__rawOn === 'function') map.__rawOn('load', retry);
+        else if (map && typeof map.on === 'function') map.on('load', retry);
+        // fallback: ha valamiert nem jon a load event, ne alljon meg az app
+        setTimeout(retry, 1200);
+      }
+    } catch (_) {}
   }
 }
 
@@ -1590,12 +1610,8 @@ function buildMyLocationFeatureCollection(lat, lng, headingDeg, accM){
 
 async function ensureMyLocationLayer(){
   if (!map) return;
-  try {
-    if (typeof map.loaded === 'function' && !map.loaded()) {
-      await new Promise((resolve) => map.on('load', resolve));
-    }
-  } catch (_) {}
 
+  // Ugyanaz a deadlock veszely, mint a markereknel: ne await-eljunk 'load'-ot.
   try {
     if (map.getSource && map.getSource(MYLOC_SOURCE_ID)) return;
 
@@ -1651,8 +1667,28 @@ async function ensureMyLocationLayer(){
       } catch (_) {}
     });
 
+    // Ha mar van pozicio, rajzoljuk ujra, mert eddig source hianyaban kimaradhatott.
+    try {
+      if (lastMyLocation && isFinite(lastMyLocation.lat) && isFinite(lastMyLocation.lng)) {
+        setMyLocationGeoData(lastMyLocation.lat, lastMyLocation.lng, lastHeadingDeg, lastMyLocationAccM, { force: true });
+      }
+    } catch (_) {}
+
   } catch (err) {
-    console.error('ensureMyLocationLayer failed', err);
+    console.warn('ensureMyLocationLayer deferred', err);
+    try {
+      if (!ensureMyLocationLayer.__retryScheduled) {
+        ensureMyLocationLayer.__retryScheduled = true;
+        const retry = () => {
+          ensureMyLocationLayer.__retryScheduled = false;
+          ensureMyLocationLayer().catch(() => {});
+        };
+        if (map && typeof map.once === 'function') map.once('load', retry);
+        else if (map && typeof map.__rawOn === 'function') map.__rawOn('load', retry);
+        else if (map && typeof map.on === 'function') map.on('load', retry);
+        setTimeout(retry, 1200);
+      }
+    } catch (_) {}
   }
 }
 
