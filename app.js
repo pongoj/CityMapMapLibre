@@ -1,4 +1,4 @@
-const APP_VERSION = "6.1";
+const APP_VERSION = "6.2";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -207,16 +207,22 @@ let markerModalMode = "add";
 let editingMarkerId = null;
 let editingMarkerUuid = null;
 
-// Térképi szűrés UI ("Összes megjelenítése" gomb)
+// Térképi szűrés UI ("Összes megjelenítése" gomb) – GeoJSON layer
+function _getVisibleMarkerRecords() {
+  const out = [];
+  const want = (activeMapFilterIds instanceof Set) ? activeMapFilterIds : null;
+  for (const [id, m] of markersById.entries()) {
+    if (!m || m.deletedAt) continue;
+    if (want && !want.has(Number(id))) continue;
+    out.push(m);
+  }
+  return out;
+}
+
 function getVisibleMarkerBounds() {
   if (!map) return null;
-  const latlngs = [];
-  for (const [, mk] of markerLayers.entries()) {
-    if (mk && map.hasLayer(mk)) {
-      const ll = mk.getLatLng?.();
-      if (ll) latlngs.push(ll);
-    }
-  }
+  const recs = _getVisibleMarkerRecords();
+  const latlngs = recs.map(m => ({ lat: m.lat, lng: m.lng })).filter(ll => isFinite(ll.lat) && isFinite(ll.lng));
   if (latlngs.length === 0) return null;
   return CM.latLngBounds(latlngs);
 }
@@ -224,34 +230,29 @@ function getVisibleMarkerBounds() {
 function fitMapToVisibleMarkers() {
   const b = getVisibleMarkerBounds();
   if (!b) return;
-  try {
-    map.fitBounds(b, { padding: [30, 30] });
-  } catch (_) {
-    // no-op
-  }
+  try { map.fitBounds(b, { padding: [30, 30] }); } catch (_) {}
 }
 
 function isMapFiltered() {
   if (!(activeMapFilterIds instanceof Set)) return false;
-  for (const id of markerLayers.keys()) {
+  const allIds = Array.from(markersById.keys()).map(Number).filter(Number.isFinite);
+  if (allIds.length === 0) return false;
+  if (activeMapFilterIds.size !== allIds.length) return true;
+  for (const id of allIds) {
     if (!activeMapFilterIds.has(Number(id))) return true;
   }
-  return markerLayers.size > 0 && activeMapFilterIds.size === 0;
+  return false;
 }
 
 function updateShowAllButtonVisibility() {
   const btn = document.getElementById("btnShowAll");
   if (!btn) return;
-
   btn.style.display = isMapFiltered() ? "inline-block" : "none";
 }
 
 function clearMapMarkerVisibilityFilter() {
   activeMapFilterIds = null;
-
-  for (const [, mk] of markerLayers.entries()) {
-    if (map && mk && !map.hasLayer(mk)) mk.addTo(map);
-  }
+  refreshMarkersSource();
   updateShowAllButtonVisibility();
 }
 
@@ -285,7 +286,15 @@ async function cleanupDraftPhotosIfNeeded() {
   }
 }
 
-const markerLayers = new Map();
+const markersById = new Map(); // id -> marker record (active)
+
+// GeoJSON markers layer (DOM marker helyett)
+const MARKERS_SOURCE_ID = "cm-markers";
+const MARKERS_LAYER_ID = "cm-markers-layer";
+
+let activeMarkerPopup = null;
+let activePopupMarkerId = null;
+
 
 // Fotó galéria (markerhez rendelt képek megtekintése)
 const photoGalleryModal = document.getElementById("photoGalleryModal");
@@ -1423,6 +1432,227 @@ function popupHtml(m) {
   </div>`;
 }
 
+// === v6.2: Stabil marker réteg (DOM marker -> GeoJSON layer) ===
+const _EMPTY_FC = { type: "FeatureCollection", features: [] };
+
+function _markerColorFor(m){
+  try {
+    const meta = m && Number.isFinite(Number(m.typeId)) ? _typeMetaById.get(Number(m.typeId)) : null;
+    const c = meta && meta.color ? String(meta.color).trim() : "#6b7280";
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c) ? c : "#6b7280";
+  } catch (_) {
+    return "#6b7280";
+  }
+}
+
+function markerToFeature(m){
+  return {
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [Number(m.lng), Number(m.lat)] },
+    properties: {
+      id: Number(m.id),
+      uuid: String(m.uuid || ""),
+      address: String(m.address || ""),
+      typeId: (Number.isFinite(Number(m.typeId)) ? Number(m.typeId) : null),
+      statusId: (Number.isFinite(Number(m.statusId)) ? Number(m.statusId) : null),
+      typeLabel: String(m.typeLabel || ""),
+      statusLabel: String(m.statusLabel || ""),
+      notes: String(m.notes || ""),
+      color: _markerColorFor(m)
+    }
+  };
+}
+
+function buildMarkersFeatureCollection({ recalcColor = false } = {}){
+  const want = (activeMapFilterIds instanceof Set) ? activeMapFilterIds : null;
+  const feats = [];
+  for (const [id, m] of markersById.entries()) {
+    if (!m || m.deletedAt) continue;
+    if (want && !want.has(Number(id))) continue;
+    feats.push(markerToFeature(m));
+  }
+  return { type: "FeatureCollection", features: feats };
+}
+
+async function ensureMarkersLayer(){
+  if (!map) return;
+  try {
+    if (typeof map.loaded === 'function' && !map.loaded()) {
+      await new Promise((resolve) => map.on('load', resolve));
+    }
+  } catch (_) {}
+
+  try {
+    if (map.getSource && map.getSource(MARKERS_SOURCE_ID)) return;
+
+    map.addSource(MARKERS_SOURCE_ID, { type: 'geojson', data: _EMPTY_FC });
+
+    map.addLayer({
+      id: MARKERS_LAYER_ID,
+      type: 'circle',
+      source: MARKERS_SOURCE_ID,
+      paint: {
+        'circle-color': ['coalesce', ['get', 'color'], '#6b7280'],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 10, 22, 14],
+        'circle-stroke-width': 1,
+        'circle-stroke-color': 'rgba(0,0,0,0.35)',
+        'circle-stroke-opacity': 0.9
+      }
+    });
+
+    map.on('mouseenter', MARKERS_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
+    map.on('mouseleave', MARKERS_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
+
+    map.on('click', MARKERS_LAYER_ID, async (e) => {
+      try {
+        if (moveModeMarkerId) return;
+
+        const f = e && e.features && e.features[0] ? e.features[0] : null;
+        const id = f && f.properties ? Number(f.properties.id) : NaN;
+        if (!Number.isFinite(id)) return;
+        const m = markersById.get(id) || await DB.getMarkerById(id);
+        if (!m || m.deletedAt) return;
+        markersById.set(id, m);
+        openMarkerPopup(m, e && e.lngLat ? e.lngLat : null);
+      } catch (err) {
+        console.warn('marker click failed', err);
+      }
+    });
+
+  } catch (err) {
+    console.error('ensureMarkersLayer failed', err);
+  }
+}
+
+function refreshMarkersSource(opts){
+  if (!map) return;
+  try {
+    const src = map.getSource ? map.getSource(MARKERS_SOURCE_ID) : null;
+    if (!src || typeof src.setData !== 'function') return;
+    src.setData(buildMarkersFeatureCollection(opts));
+  } catch (_) {
+    // style még nem kész
+  }
+}
+
+function closeActiveMarkerPopup(){
+  if (!activeMarkerPopup) return;
+  try { activeMarkerPopup.remove(); } catch (_) {}
+  activeMarkerPopup = null;
+  activePopupMarkerId = null;
+}
+
+function openMarkerPopup(m, lngLat){
+  if (!map || !m) return;
+  closeActiveMarkerPopup();
+
+  const ll = lngLat ? [lngLat.lng, lngLat.lat] : [Number(m.lng), Number(m.lat)];
+  const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: [0, -16] });
+  popup.on('open', () => {
+    try { wireMarkerPopupButtons(popup, m); } catch (_) {}
+  });
+  popup.setLngLat(ll).setHTML(popupHtml(m)).addTo(map);
+  // Fallback: egyes böngészőkben az "open" event késhet
+  setTimeout(() => { try { wireMarkerPopupButtons(popup, m); } catch (_) {} }, 0);
+  activeMarkerPopup = popup;
+  activePopupMarkerId = Number(m.id);
+}
+
+function wireMarkerPopupButtons(popup, m){
+  if (!popup || !m) return;
+  const el = popup.getElement && popup.getElement();
+  if (!el) return;
+
+  // Fotók
+  (async () => {
+    const btn = el.querySelector('.btnPhotos');
+    const span = el.querySelector(`#pc-${CSS.escape(m.uuid)}`);
+    try {
+      const cnt = await DB.countPhotosByMarkerUuid(m.uuid);
+      if (span) span.textContent = String(cnt);
+      if (btn) {
+        btn.disabled = cnt === 0;
+        btn.title = cnt === 0 ? 'Nincs hozzárendelt kép' : 'Képek megtekintése';
+        btn.onclick = (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          openPhotoGallery(m.uuid, btn.getAttribute('data-title') || idText(m.id));
+        };
+      }
+    } catch (_) {
+      if (span) span.textContent = '0';
+      if (btn) btn.disabled = true;
+    }
+  })();
+
+  // Törlés
+  const delBtn = el.querySelector(`button[data-del="${m.id}"]`);
+  if (delBtn) {
+    delBtn.onclick = async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const ok = confirm('Biztosan törlöd ezt a markert? (soft delete)\nA törölt marker később megjeleníthető a szűrés ablakban.');
+      if (!ok) return;
+      try {
+        await DB.softDeleteMarker(Number(m.id));
+        markersById.delete(Number(m.id));
+        if (activeMapFilterIds instanceof Set) activeMapFilterIds.delete(Number(m.id));
+        closeActiveMarkerPopup();
+        refreshMarkersSource();
+        updateShowAllButtonVisibility();
+        try { _allMarkersCache = filterShowDeleted ? await DB.getAllMarkers() : await DB.getAllMarkersActive(); } catch (_) {}
+        try { applyFilter(); } catch (_) {}
+      } catch (err) {
+        console.error('delete marker failed', err);
+        alert('Nem sikerült törölni a markert.');
+      }
+    };
+  }
+
+  // Módosítás
+  const editBtn = el.querySelector(`button[data-edit="${m.id}"]`);
+  if (editBtn) {
+    editBtn.onclick = async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      try {
+        const fresh = await DB.getMarkerById(Number(m.id));
+        if (!fresh || fresh.deletedAt) {
+          alert('A törölt marker nem módosítható.');
+          return;
+        }
+        closeActiveMarkerPopup();
+        openEditModal(fresh);
+      } catch (err) {
+        console.error('open edit from popup failed', err);
+        alert('Nem sikerült betölteni a marker adatait.');
+      }
+    };
+  }
+
+  // Mozgatás
+  const moveBtn = el.querySelector(`button[data-move="${m.id}"]`);
+  if (moveBtn) {
+    moveBtn.onclick = async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      try {
+        const fresh = await DB.getMarkerById(Number(m.id));
+        if (!fresh || fresh.deletedAt) {
+          alert('A törölt marker nem mozgatható.');
+          return;
+        }
+        moveModeMarkerId = Number(m.id);
+        showHint('Mozgatás: válaszd ki az új helyet a térképen.');
+        closeActiveMarkerPopup();
+      } catch (err) {
+        console.error('move from popup failed', err);
+        alert('Nem sikerült betölteni a marker adatait.');
+      }
+    };
+  }
+}
+
 
 function wirePopupDelete(marker, dbId) {
   marker.on("popupopen", (e) => {
@@ -1439,7 +1669,7 @@ function wirePopupDelete(marker, dbId) {
 
       await DB.softDeleteMarker(dbId);
       map.removeLayer(marker);
-      markerLayers.delete(dbId);
+      markersById.delete(dbId);
 
       if (activeMapFilterIds instanceof Set) activeMapFilterIds.delete(Number(dbId));
       updateShowAllButtonVisibility();
@@ -1523,40 +1753,21 @@ function wirePopupPhotos(marker, m) {
 }
 
 async function getMarker(id) {
-  const all = await DB.getAllMarkersActive();
-  return all.find(x => x.id === id) || null;
+  const n = Number(id);
+  if (!Number.isFinite(n)) return null;
+  return markersById.get(n) || null;
 }
 
-function addMarkerToMap(m) {  const mk = CM.marker([m.lat, m.lng], { draggable: false, icon: iconForMarker(m, map.getZoom()) }).addTo(map);
-mk.__data = m;
-  mk.bindPopup(popupHtml(m));
-  wirePopupDelete(mk, m.id);
-  wirePopupEdit(mk, m.id);
-  wirePopupMove(mk, m.id);
-  wirePopupPhotos(mk, m);
-
-  markerLayers.set(m.id, mk);
-
-  // v5.15: ha aktív térképi szűrés van, az új marker csak akkor maradjon látható, ha benne van a szűrésben
-  if (activeMapFilterIds instanceof Set) {
-    if (!activeMapFilterIds.has(Number(m.id))) {
-      map.removeLayer(mk);
-    }
-  }
-
+function addMarkerToMap(m) {
+  if (!m || !Number.isFinite(Number(m.id))) return;
+  markersById.set(Number(m.id), m);
+  refreshMarkersSource();
   updateShowAllButtonVisibility();
 }
 
 function refreshAllMarkerIcons() {
-  try {
-    markerLayers.forEach((mk, id) => {
-      const d = mk && mk.__data ? mk.__data : null;
-      if (!d) return;
-      mk.setIcon(iconForMarker(d, map.getZoom()));
-    });
-  } catch (e) {
-    console.warn('refreshAllMarkerIcons failed', e);
-  }
+  // DOM marker ikonok helyett: GeoJSON tulajdonságok újraszámolása (pl. színek)
+  refreshMarkersSource({ recalcColor: true });
 }
 
 
@@ -1709,8 +1920,11 @@ async function openEditModal(marker) {
 
 async function loadMarkers() {
   const all = await DB.getAllMarkersActive();
-  all.forEach(addMarkerToMap);
-
+  markersById.clear();
+  (all || []).forEach((m) => {
+    if (m && Number.isFinite(Number(m.id)) && !m.deletedAt) markersById.set(Number(m.id), m);
+  });
+  refreshMarkersSource();
   updateShowAllButtonVisibility();
 }
 
@@ -1725,7 +1939,10 @@ async function fillLookups() {
   // cache a marker színekhez (typeId -> color)
   try { setTypeMetaCache(types); } catch (_) {}
 
-  // alapértékek (nincs default kiválasztás)
+  
+  // Marker színek frissítése (GeoJSON layer)
+  try { refreshMarkersSource({ recalcColor: true }); } catch (_) {}
+// alapértékek (nincs default kiválasztás)
   setPickerValue('type', null);
   setPickerValue('status', null);
 }
@@ -1739,9 +1956,7 @@ async function saveMarker() {
     const statusId = Number(document.getElementById("fStatus")?.value || NaN);
     const sRec = _formStatuses.find(x => Number(x.id) === statusId) || null;
     const statusLabel = sRec ? String(sRec.status || '').trim() : '';
-    const statusInternalId = sRec ? String(sRec.internalId || '').trim() : '';
-
-    await DB.updateMarker(editingMarkerId, {
+    const statusInternalId = sRec ? String(sRec.internalId || '').trim() : '';  await DB.updateMarker(editingMarkerId, {
       statusId: Number.isFinite(statusId) ? statusId : null,
       status: String(statusInternalId || ""),
       statusLabel: String(statusLabel || ""),
@@ -1751,10 +1966,18 @@ async function saveMarker() {
     });
 
     const updated = await DB.getMarkerById(editingMarkerId);
-    const mk = markerLayers.get(editingMarkerId);
-    if (updated && mk) {
-      mk.__data = updated;
-      mk.setPopupContent(popupHtml(updated));
+    if (updated && !updated.deletedAt) {
+      markersById.set(Number(editingMarkerId), updated);
+      refreshMarkersSource();
+      if (activeMarkerPopup && activePopupMarkerId === Number(editingMarkerId)) {
+        try {
+          activeMarkerPopup.setLngLat([updated.lng, updated.lat]);
+          activeMarkerPopup.setHTML(popupHtml(updated));
+          setTimeout(() => {
+            try { wireMarkerPopupButtons(activeMarkerPopup, updated); } catch (_) {}
+          }, 0);
+        } catch (_) {}
+      }
     }
 
     closeModal();
@@ -2033,9 +2256,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   // map.removeLayer kompat (marker wrapperhez)
   map.removeLayer = (layer) => { try { if (layer && typeof layer.remove === "function") layer.remove(); } catch (_) {} };
 
-  // Események: Map-szerű click objektum, ahol kell
+  // Események: Map-szerű click objektum (Leaflet-kompat), DE a MapLibre layer-es szignatúrákat is hagyjuk élni.
   const _on = map.on.bind(map);
-  map.on = (evt, handler) => {
+  map.__rawOn = _on;
+  map.on = (evt, layerOrHandler, maybeHandler) => {
+    // MapLibre: map.on(event, layerId, handler)
+    if (typeof layerOrHandler === 'string' || Array.isArray(layerOrHandler)) {
+      return _on(evt, layerOrHandler, maybeHandler);
+    }
+
+    const handler = layerOrHandler;
     if (evt === "click") {
       return _on("click", (e) => handler({ latlng: { lat: e.lngLat.lat, lng: e.lngLat.lng }, originalEvent: e.originalEvent || e }));
     }
@@ -2165,28 +2395,36 @@ if (navBtn) {
   document.getElementById("btnClear").addEventListener("click", async () => {
     if (!confirm("Biztosan törlöd az összes markert?")) return;
     await DB.clearMarkers();
-    for (const mk of markerLayers.values()) map.removeLayer(mk);
-    markerLayers.clear();
+    markersById.clear();
     activeMapFilterIds = null;
+    if (activeMarkerPopup) { try { activeMarkerPopup.remove(); } catch (_) {} activeMarkerPopup = null; activePopupMarkerId = null; }
+    refreshMarkersSource();
     updateShowAllButtonVisibility();
   });
   map.on("click", async (e) => {
     // Ha marker mozgatás mód aktív, akkor a kattintás az új pozíció
     if (moveModeMarkerId) {
       const ll = rotatedClickLatLng(e);
-      const id = moveModeMarkerId;
+      const id = Number(moveModeMarkerId);
       moveModeMarkerId = null;
       try {
         await DB.updateMarker(id, { lat: ll.lat, lng: ll.lng, updatedAt: Date.now() });
-        const mk = markerLayers.get(id);
-        if (mk) {
-          mk.setLatLng([ll.lat, ll.lng]);
-          const updated = await getMarker(id);
-          if (updated) {
-            mk.__data = updated;
-            mk.setIcon(resizedIconForMarker(updated, map.getZoom()));
-            mk.setPopupContent(popupHtml(updated));
+        const updated = await DB.getMarkerById(id);
+        if (updated && !updated.deletedAt) {
+          markersById.set(id, updated);
+          refreshMarkersSource();
+          if (activeMarkerPopup && activePopupMarkerId === id) {
+            try {
+              activeMarkerPopup.setLngLat([updated.lng, updated.lat]);
+              activeMarkerPopup.setHTML(popupHtml(updated));
+              setTimeout(() => {
+                try { wireMarkerPopupButtons(activeMarkerPopup, updated); } catch (_) {}
+              }, 0);
+            } catch (_) {}
           }
+        } else {
+          markersById.delete(id);
+          refreshMarkersSource();
         }
         showHint("Objektum áthelyezve.");
       } catch (err) {
@@ -2319,16 +2557,9 @@ if (navBtn) {
   const ok = await centerToMyLocation();
   if (!ok) map.setView([47.4979, 19.0402], 15);
 
+  await ensureMarkersLayer();
+
   await loadMarkers();
-  
-  map.on("zoomend", () => {
-  const z = map.getZoom();
-  markerLayers.forEach((mk, id) => {
-    const data = mk.__data;
-    if (!data) return;
-    mk.setIcon(resizedIconForMarker(data, z));
-  });
-});
 
   document.getElementById("btnFilter").addEventListener("click", () => {
     // Ha épp térképi megjelenítés-szűrés aktív (csak kijelöltek / táblázat tartalma),
@@ -2473,12 +2704,8 @@ if (navBtn) {
         for (const id of ids) {
           await DB.softDeleteMarker(id);
 
-          const leafletMarker = markerLayers.get(id);
-          if (leafletMarker) {
-            map.removeLayer(leafletMarker);
-            markerLayers.delete(id);
-          }
-
+          // GeoJSON rétegből eltűnik (refreshMarkersSource)
+          markersById.delete(Number(id));
           if (activeMapFilterIds instanceof Set) activeMapFilterIds.delete(Number(id));
         }
 
@@ -2890,20 +3117,9 @@ function getIdsFromCurrentFilterTable({ includeDeleted = false } = {}) {
 
 function applyMapMarkerVisibility(idsToShow) {
   const want = new Set((idsToShow || []).map((x) => Number(x)).filter((x) => Number.isFinite(x)));
-  activeMapFilterIds = want.size > 0 ? want : new Set();
-
-  // Minden aktív (térképen létező) markerből csak a kért id-k maradjanak láthatók
-  for (const [id, mk] of markerLayers.entries()) {
-    const shouldBeVisible = want.has(Number(id));
-    const isVisibleNow = map && mk ? map.hasLayer(mk) : false;
-
-    if (shouldBeVisible && !isVisibleNow) {
-      mk.addTo(map);
-    } else if (!shouldBeVisible && isVisibleNow) {
-      map.removeLayer(mk);
-    }
-  }
-
+  // üres listánál -> 0 marker látszik
+  activeMapFilterIds = (want.size > 0) ? want : new Set();
+  refreshMarkersSource();
   updateShowAllButtonVisibility();
 }
 
@@ -2915,13 +3131,10 @@ function fitMapToMarkersByIds(idsToShow) {
 
   const latlngs = [];
   for (const id of ids) {
-    const mk = markerLayers.get(Number(id));
-    if (!mk) continue;
-    if (typeof mk.getLatLng === "function") {
-      latlngs.push(mk.getLatLng());
-    }
+    const m = markersById.get(Number(id));
+    if (!m || m.deletedAt) continue;
+    latlngs.push({ lat: m.lat, lng: m.lng });
   }
-
   if (latlngs.length === 0) return;
 
   if (latlngs.length === 1) {
@@ -3112,11 +3325,11 @@ const tb = document.getElementById("sfList");
 	      // ha törölt (soft delete), akkor ne zárjuk be a modalt
 	      if (tr.classList.contains("row-deleted")) return;
 	      const id = Number(tr.dataset.markerId);
-	      const mk = markerLayers.get(id);
-	      if (mk) {
-	        const ll = mk.getLatLng();
-	        map.setView(ll, Math.max(map.getZoom(), 18));
-	        mk.openPopup();
+	      const m = markersById.get(id);
+	      if (m && !m.deletedAt) {
+	        map.setView({ lat: m.lat, lng: m.lng }, Math.max(map.getZoom(), 18));
+	        // popup nyitás (GeoJSON layer)
+	        try { openMarkerPopup(m, { lng: m.lng, lat: m.lat }); } catch (_) {}
 	        closeFilterModal();
 	      }
 	    });
