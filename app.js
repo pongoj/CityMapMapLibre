@@ -1,4 +1,4 @@
-const APP_VERSION = "6.3";
+const APP_VERSION = "6.3.1";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -2751,10 +2751,21 @@ if (navBtn) {
       }
     });
   })();
-  const ok = await centerToMyLocation();
-  if (!ok) map.setView([47.4979, 19.0402], 15);
+  // v6.3.1: NE blokkoljuk az indulast geolocation prompttal.
+  // Automatikus kozepre csak akkor, ha mar engedelyezve van a hely.
+  (async () => {
+    try {
+      const p = (navigator.permissions && navigator.permissions.query)
+        ? await navigator.permissions.query({ name: "geolocation" })
+        : null;
+      if (p && p.state === "granted") {
+        centerToMyLocation().catch(() => {});
+      }
+    } catch (_) {}
+  })();
 
   await ensureMarkersLayer();
+  await ensureMyLocationLayer();
 
   await loadMarkers();
 
