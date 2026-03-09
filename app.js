@@ -1,4 +1,4 @@
-const APP_VERSION = "6.2.1";
+const APP_VERSION = "6.3";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -291,6 +291,13 @@ const markersById = new Map(); // id -> marker record (active)
 // GeoJSON markers layer (DOM marker helyett)
 const MARKERS_SOURCE_ID = "cm-markers";
 const MARKERS_LAYER_ID = "cm-markers-layer";
+
+// Saját hely GeoJSON layer (DOM marker helyett)
+const MYLOC_SOURCE_ID = "cm-mylocation";
+const MYLOC_HEADING_LAYER_ID = "cm-mylocation-heading";
+const MYLOC_POINT_LAYER_ID = "cm-mylocation-point";
+const MYLOC_HIT_LAYER_ID = "cm-mylocation-hit";
+
 
 let activeMarkerPopup = null;
 let activePopupMarkerId = null;
@@ -644,10 +651,14 @@ async function closeModal() {
   currentDraftUuid = null;
 }
 
-let myLocationMarker = null;
+let myLocationMarker = null; // DEPRECATED (v6.3): DOM marker helyett GeoJSON layer
+let myLocationPopup = null;
 let myLocationWatchId = null;
 let myLocationAddressText = "Saját hely";
 let lastMyLocCenterTs = 0; // (megtartva kompatibilitás miatt, de már mindig követjük a pozíciót)
+let lastMyLocationAccM = NaN;
+let _myLocLastRendered = null;
+let _myLocLastRenderedTs = 0;
 
 
 // v5.40: GPS simítás (Google-szerűbb mozgás):
@@ -839,9 +850,10 @@ function _getScreenAngle(){
 }
 
 function _updateMyLocIconHeading(){
-  if (!myLocationMarker) return;
+  // v6.3: Saját hely DOM marker helyett GeoJSON layer – heading frissítés
+  if (!map || !lastMyLocation) return;
   try {
-    myLocationMarker.setIcon(myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg));
+    setMyLocationGeoData(lastMyLocation.lat, lastMyLocation.lng, lastHeadingDeg, lastMyLocationAccM, { force: false, headingOnly: true });
   } catch (_) {}
 }
 
@@ -1087,7 +1099,7 @@ function animateMarkerTo(marker, toLat, toLng, durationMs = GPS_MARKER_ANIM_MS) 
 }
 
 async function ensureMyLocationMarker(lat, lng, fetchAddressOnce = false) {
-  const ll = [lat, lng];
+  // v6.3: Saját hely DOM marker helyett GeoJSON layer
 
   if (fetchAddressOnce) {
     try {
@@ -1098,19 +1110,15 @@ async function ensureMyLocationMarker(lat, lng, fetchAddressOnce = false) {
     }
   }
 
-if (!myLocationMarker) {
-    myLocationMarker = CM.marker(ll, { icon: myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg) }).addTo(map);
-    myLocationMarker.bindPopup(`<b>Saját hely</b><br>${escapeHtml(myLocationAddressText)}`);
-  } else {
-    animateMarkerTo(myLocationMarker, lat, lng, GPS_MARKER_ANIM_MS);
-    try {
-      myLocationMarker.setIcon(myLocArrowIconForZoomHeading(map.getZoom(), lastHeadingDeg));
-    } catch (_) {}
-    if (myLocationMarker.getPopup()) {
-      myLocationMarker.getPopup().setHTML(
-        `<b>Saját hely</b><br>${escapeHtml(myLocationAddressText)}`
-      );
-    }
+  await ensureMyLocationLayer();
+
+  // Első frissítésnél erőltessük, utána küszöbökkel / throttling-gal
+  const force = !_myLocLastRendered;
+  setMyLocationGeoData(lat, lng, lastHeadingDeg, lastMyLocationAccM, { force });
+
+  // Popup szöveg frissítés (ha nyitva van)
+  if (myLocationPopup && typeof myLocationPopup.setHTML === 'function') {
+    try { myLocationPopup.setHTML(myLocationPopupHtml()); } catch (_) {}
   }
 }
 
@@ -1133,6 +1141,9 @@ function startMyLocationWatch() {
       }
 
       const nowTs = Date.now();
+
+      // v6.3: pontosság cache a saját hely layerhez
+      lastMyLocationAccM = acc;
 
       // Heading források:
       // - mozgás közben: geolocation heading (ha van)
@@ -1374,6 +1385,7 @@ async function centerToMyLocation() {
       async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
+        lastMyLocationAccM = (typeof pos.coords.accuracy === "number" && isFinite(pos.coords.accuracy)) ? pos.coords.accuracy : lastMyLocationAccM;
         lastMyLocation = { lat, lng, ts: Date.now() };
 
         lastMyLocCenterTs = Date.now();
@@ -1539,6 +1551,184 @@ function refreshMarkersSource(opts){
     src.setData(buildMarkersFeatureCollection(opts));
   } catch (_) {
     // style még nem kész
+  }
+}
+
+
+// === v6.3: Saját hely réteg stabilizálás (GeoJSON source + layer) ===
+const _EMPTY_MYLOC_FC = { type: "FeatureCollection", features: [] };
+
+function buildMyLocationFeatureCollection(lat, lng, headingDeg, accM){
+  if (!isFinite(lat) || !isFinite(lng)) return _EMPTY_MYLOC_FC;
+  const feats = [];
+
+  // Heading vonal (irány)
+  if (typeof headingDeg === 'number' && isFinite(headingDeg)) {
+    try {
+      const aheadM = 22; // fix, stabil – nem zoomfüggő (később finomítható)
+      const o = offsetLatLng(lat, lng, headingDeg, aheadM);
+      feats.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[Number(lng), Number(lat)], [Number(o[1]), Number(o[0])]] },
+        properties: { kind: 'heading' }
+      });
+    } catch (_) {}
+  }
+
+  // Saját hely pont
+  feats.push({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [Number(lng), Number(lat)] },
+    properties: {
+      kind: 'point',
+      acc: (typeof accM === 'number' && isFinite(accM)) ? Number(accM) : null
+    }
+  });
+
+  return { type: 'FeatureCollection', features: feats };
+}
+
+async function ensureMyLocationLayer(){
+  if (!map) return;
+  try {
+    if (typeof map.loaded === 'function' && !map.loaded()) {
+      await new Promise((resolve) => map.on('load', resolve));
+    }
+  } catch (_) {}
+
+  try {
+    if (map.getSource && map.getSource(MYLOC_SOURCE_ID)) return;
+
+    map.addSource(MYLOC_SOURCE_ID, { type: 'geojson', data: _EMPTY_MYLOC_FC });
+
+    // Irány (line)
+    map.addLayer({
+      id: MYLOC_HEADING_LAYER_ID,
+      type: 'line',
+      source: MYLOC_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'heading'],
+      paint: {
+        'line-color': '#2563eb',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 14, 2.0, 18, 3.2, 22, 4.6],
+        'line-opacity': 0.85
+      }
+    });
+
+    // Pont (circle)
+    map.addLayer({
+      id: MYLOC_POINT_LAYER_ID,
+      type: 'circle',
+      source: MYLOC_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'point'],
+      paint: {
+        'circle-color': '#2563eb',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 9, 22, 13],
+        'circle-stroke-width': 2,
+        'circle-stroke-color': 'rgba(255,255,255,0.95)'
+      }
+    });
+
+    // Láthatatlan "hit" réteg – könnyebb rákattintani mobilon
+    map.addLayer({
+      id: MYLOC_HIT_LAYER_ID,
+      type: 'circle',
+      source: MYLOC_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'point'],
+      paint: {
+        'circle-color': '#000000',
+        'circle-opacity': 0,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 26, 22, 34]
+      }
+    });
+
+    map.on('mouseenter', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
+    map.on('mouseleave', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
+
+    map.on('click', MYLOC_HIT_LAYER_ID, () => {
+      try {
+        if (moveModeMarkerId) return;
+        openMyLocationPopup();
+      } catch (_) {}
+    });
+
+  } catch (err) {
+    console.error('ensureMyLocationLayer failed', err);
+  }
+}
+
+function myLocationPopupHtml(){
+  const lines = [];
+  lines.push('<b>Saját hely</b>');
+  if (myLocationAddressText) lines.push(escapeHtml(myLocationAddressText));
+  const acc = (typeof lastMyLocationAccM === 'number' && isFinite(lastMyLocationAccM)) ? Math.round(lastMyLocationAccM) : null;
+  if (acc !== null) lines.push(`Pontosság: ±${acc} m`);
+  const hdg = (typeof lastHeadingDeg === 'number' && isFinite(lastHeadingDeg)) ? Math.round(_normDeg(lastHeadingDeg)) : null;
+  if (hdg !== null) lines.push(`Irány: ${hdg}°`);
+  const modeLabel = (navMode === 'heading') ? 'haladási irány' : 'észak felül';
+  lines.push(`Navigáció: ${escapeHtml(modeLabel)}`);
+  return lines.join('<br>');
+}
+
+function closeMyLocationPopup(){
+  if (!myLocationPopup) return;
+  try { myLocationPopup.remove(); } catch (_) {}
+  myLocationPopup = null;
+}
+
+function openMyLocationPopup(){
+  if (!map || !lastMyLocation) return;
+  try {
+    closeMyLocationPopup();
+    const ll = [Number(lastMyLocation.lng), Number(lastMyLocation.lat)];
+    const p = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: [0, -18] });
+    p.setLngLat(ll).setHTML(myLocationPopupHtml()).addTo(map);
+    myLocationPopup = p;
+  } catch (_) {}
+}
+
+function setMyLocationGeoData(lat, lng, headingDeg, accM, opts = {}){
+  if (!map) return;
+  const src = map.getSource ? map.getSource(MYLOC_SOURCE_ID) : null;
+  if (!src || typeof src.setData !== 'function') return;
+
+  const force = !!opts.force;
+  const headingOnly = !!opts.headingOnly;
+
+  const now = Date.now();
+  const prev = _myLocLastRendered;
+
+  if (!force && prev) {
+    const d = distanceMeters(lat, lng, prev.lat, prev.lng);
+
+    let dh = 999;
+    if (typeof headingDeg === 'number' && isFinite(headingDeg) && typeof prev.heading === 'number' && isFinite(prev.heading)) {
+      dh = Math.abs(shortestAngleDelta(prev.heading, headingDeg));
+    }
+
+    const minMove = headingOnly ? 0 : 0.6;
+    const minHeading = 2.0;
+    const minInterval = headingOnly ? 120 : 60;
+
+    // túl sűrű, túl kicsi változás → skip
+    if ((now - _myLocLastRenderedTs) < minInterval && d < minMove && dh < minHeading) return;
+
+    // heading-only frissítésnél csak az irány változás számít
+    if (headingOnly && dh < minHeading) return;
+
+    // pozíció frissítésnél: ha alig mozdult és az irány sem változott érdemben, skip
+    if (!headingOnly && d < minMove && dh < minHeading) return;
+  }
+
+  _myLocLastRendered = { lat, lng, heading: headingDeg, acc: accM };
+  _myLocLastRenderedTs = now;
+
+  try {
+    src.setData(buildMyLocationFeatureCollection(lat, lng, headingDeg, accM));
+  } catch (_) {}
+
+  // Ha a saját hely popup nyitva van, frissítsük a pozíciót + szöveget
+  if (myLocationPopup && typeof myLocationPopup.setLngLat === 'function') {
+    try { myLocationPopup.setLngLat([Number(lng), Number(lat)]).setHTML(myLocationPopupHtml()); } catch (_) {}
   }
 }
 
@@ -4286,6 +4476,8 @@ async function refreshFilterData() {
 function rotatedClickLatLng(e){ return (e && e.latlng) ? e.latlng : { lat: 0, lng: 0 }; }
 
 let __cm_nav_bearing_raf = null;
+let __cm_nav_last_applied = null;
+let __cm_nav_last_ts = 0;
 function scheduleApplyNavBearing(){
   try {
     if (!map || typeof map.getBearing !== "function") return;
@@ -4293,6 +4485,24 @@ function scheduleApplyNavBearing(){
     __cm_nav_bearing_raf = requestAnimationFrame(() => {
       __cm_nav_bearing_raf = null;
       const target = (navMode === "heading" && isFinite(lastHeadingDeg)) ? _normDeg(-lastHeadingDeg) : 0;
+
+      const now = Date.now();
+      const cur = (typeof map.getBearing === 'function') ? map.getBearing() : 0;
+      const curDelta = Math.abs(shortestAngleDelta(cur, target));
+
+      // ha már gyakorlatilag ott van, ne animáljunk feleslegesen
+      if (curDelta < 0.25) return;
+
+      const last = (typeof __cm_nav_last_applied === 'number' && isFinite(__cm_nav_last_applied)) ? __cm_nav_last_applied : null;
+      const lastDelta = (last !== null) ? Math.abs(shortestAngleDelta(last, target)) : 999;
+
+      // kis változásokat throttlingoljuk (kompasz zaj ellen)
+      const minInterval = (navMode === 'heading') ? 120 : 200;
+      if ((now - __cm_nav_last_ts) < minInterval && lastDelta < 1.2) return;
+
+      __cm_nav_last_applied = target;
+      __cm_nav_last_ts = now;
+
       // rövid animáció, hogy ne legyen "ugrás"
       map.easeTo({ bearing: target, duration: 180 });
     });
