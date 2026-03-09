@@ -1,4 +1,4 @@
-const APP_VERSION = "6.2";
+const APP_VERSION = "6.2.1";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -424,7 +424,14 @@ if (photoGalleryModal) {
 }
 
 function genUuid() {
-  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  // NOTE: "crypto" nem minden környezetben elérhető (pl. egyes régi/korlátozott böngészők,
+  // vagy bizonyos file:// futtatások). A "crypto &&" önmagában ReferenceError-t dobhat,
+  // ezért typeof-ot használunk.
+  try {
+    if (typeof crypto !== "undefined" && crypto && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch (_) {}
   return String(Date.now()) + "-" + String(Math.random()).replace(".", "");
 }
 

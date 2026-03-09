@@ -91,7 +91,19 @@ const DB = {
     for (const m of all) {
       let changed = false;
       const patch = {};
-      if (!m.uuid) { patch.uuid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (String(now) + "-" + String(Math.random()).replace(".", "")); changed = true; }
+      // NOTE: "crypto" nem minden környezetben elérhető. A sima "crypto &&" ReferenceError-t
+      // dobhat, ezért typeof-ot használunk.
+      if (!m.uuid) {
+        let uuid;
+        try {
+          if (typeof crypto !== "undefined" && crypto && typeof crypto.randomUUID === "function") {
+            uuid = crypto.randomUUID();
+          }
+        } catch (_) {}
+        if (!uuid) uuid = (String(now) + "-" + String(Math.random()).replace(".", ""));
+        patch.uuid = uuid;
+        changed = true;
+      }
       if (!m.createdAt) { patch.createdAt = now; changed = true; }
       if (!m.updatedAt) { patch.updatedAt = m.createdAt || now; changed = true; }
       if (typeof m.deletedAt === "undefined") { patch.deletedAt = null; changed = true; }
