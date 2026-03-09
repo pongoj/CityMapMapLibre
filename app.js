@@ -1,4 +1,5 @@
-const APP_VERSION = "6.4";
+const APP_VERSION = "6.3.2";
+
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
   if (window.CM) return;
@@ -1507,54 +1508,16 @@ async function ensureMarkersLayer(){
 
     map.addSource(MARKERS_SOURCE_ID, { type: 'geojson', data: _EMPTY_FC });
 
-    // Árnyék (alul)
     map.addLayer({
-      id: 'cm-markers-shadow',
-      type: 'circle',
-      source: MARKERS_SOURCE_ID,
-      paint: {
-        'circle-color': '#000000',
-        'circle-opacity': 0.22,
-        'circle-blur': 0.65,
-        'circle-radius': ['+', ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 10, 22, 14], 4]
-      }
-    });
-
-    // Fehér gyűrű
-    map.addLayer({
-      id: 'cm-markers-ring',
-      type: 'circle',
-      source: MARKERS_SOURCE_ID,
-      paint: {
-        'circle-color': 'rgba(255,255,255,0.98)',
-        'circle-opacity': 1.0,
-        'circle-radius': ['+', ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 10, 22, 14], 2]
-      }
-    });
-
-    // Színes belső kör (típus színe)
-    map.addLayer({
-      id: 'cm-markers-fill',
+      id: MARKERS_LAYER_ID,
       type: 'circle',
       source: MARKERS_SOURCE_ID,
       paint: {
         'circle-color': ['coalesce', ['get', 'color'], '#6b7280'],
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 10, 22, 14],
         'circle-stroke-width': 1,
-        'circle-stroke-color': 'rgba(0,0,0,0.22)',
-        'circle-stroke-opacity': 0.8
-      }
-    });
-
-    // Hit layer (láthatatlan, de nagyobb kattintási felület) – EZ kapja a click handler-t
-    map.addLayer({
-      id: MARKERS_LAYER_ID,
-      type: 'circle',
-      source: MARKERS_SOURCE_ID,
-      paint: {
-        'circle-color': '#000000',
-        'circle-opacity': 0,
-        'circle-radius': ['+', ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 10, 22, 14], 14]
+        'circle-stroke-color': 'rgba(0,0,0,0.35)',
+        'circle-stroke-opacity': 0.9
       }
     });
 
@@ -1565,44 +1528,13 @@ async function ensureMarkersLayer(){
       try {
         if (moveModeMarkerId) return;
 
-        const feats = (e && e.features) ? e.features : [];
-        if (!feats || feats.length === 0) return;
-
-        // Ha több marker esik a kattintási körzetbe (hit layer), válaszd a legközelebbit.
-        let f = feats[0];
-        try {
-          if (feats.length > 1 && e && e.point && map && typeof map.project === 'function') {
-            const px = e.point.x, py = e.point.y;
-            let best = f;
-            let bestD = Infinity;
-            for (const cand of feats) {
-              const c = cand && cand.geometry && cand.geometry.coordinates;
-              if (!c || c.length < 2) continue;
-              const sp = map.project({ lng: Number(c[0]), lat: Number(c[1]) });
-              const dx = sp.x - px;
-              const dy = sp.y - py;
-              const d = dx*dx + dy*dy;
-              if (d < bestD) { bestD = d; best = cand; }
-            }
-            f = best;
-          }
-        } catch (_) {}
-
+        const f = e && e.features && e.features[0] ? e.features[0] : null;
         const id = f && f.properties ? Number(f.properties.id) : NaN;
         if (!Number.isFinite(id)) return;
-
         const m = markersById.get(id) || await DB.getMarkerById(id);
         if (!m || m.deletedAt) return;
         markersById.set(id, m);
-
-        // Marker popup mindig a marker közepére kerüljön (ne a kattintási pontba).
-        const c = f && f.geometry && f.geometry.coordinates;
-        const anchor = (c && c.length >= 2) ? [Number(c[0]), Number(c[1])] : null;
-
-        // Ne legyen egyszerre két popup (Saját hely + marker)
-        try { closeMyLocationPopup(); } catch (_) {}
-
-        openMarkerPopup(m, anchor);
+        openMarkerPopup(m, e && e.lngLat ? e.lngLat : null);
       } catch (err) {
         console.warn('marker click failed', err);
       }
@@ -1650,19 +1582,6 @@ function buildMyLocationFeatureCollection(lat, lng, headingDeg, accM){
   if (!isFinite(lat) || !isFinite(lng)) return _EMPTY_MYLOC_FC;
   const feats = [];
 
-  // Pontossági kör (GeoJSON polygon) – stabil, mert nem pixelben, hanem méterben számolunk.
-  if (typeof accM === 'number' && isFinite(accM) && accM > 0) {
-    try {
-      const r = Math.max(8, Math.min(250, Number(accM))); // clamp: 8..250m
-      const poly = circlePolygonLngLat(lat, lng, r, 48);
-      feats.push({
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [poly] },
-        properties: { kind: 'accuracy', acc: r }
-      });
-    } catch (_) {}
-  }
-
   // Heading vonal (irány)
   if (typeof headingDeg === 'number' && isFinite(headingDeg)) {
     try {
@@ -1698,29 +1617,6 @@ async function ensureMyLocationLayer(){
 
     map.addSource(MYLOC_SOURCE_ID, { type: 'geojson', data: _EMPTY_MYLOC_FC });
 
-    // Pontossági kör (fill + outline) – ha van acc
-    map.addLayer({
-      id: 'cm-mylocation-accuracy',
-      type: 'fill',
-      source: MYLOC_SOURCE_ID,
-      filter: ['==', ['get', 'kind'], 'accuracy'],
-      paint: {
-        'fill-color': '#2563eb',
-        'fill-opacity': 0.12
-      }
-    });
-    map.addLayer({
-      id: 'cm-mylocation-accuracy-outline',
-      type: 'line',
-      source: MYLOC_SOURCE_ID,
-      filter: ['==', ['get', 'kind'], 'accuracy'],
-      paint: {
-        'line-color': '#2563eb',
-        'line-opacity': 0.28,
-        'line-width': 1.2
-      }
-    });
-
     // Irány (line)
     map.addLayer({
       id: MYLOC_HEADING_LAYER_ID,
@@ -1729,38 +1625,12 @@ async function ensureMyLocationLayer(){
       filter: ['==', ['get', 'kind'], 'heading'],
       paint: {
         'line-color': '#2563eb',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 14, 2.0, 18, 3.0, 22, 4.2],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 14, 2.0, 18, 3.2, 22, 4.6],
         'line-opacity': 0.85
       }
     });
 
-    // Árnyék a saját hely pont alatt
-    map.addLayer({
-      id: 'cm-mylocation-shadow',
-      type: 'circle',
-      source: MYLOC_SOURCE_ID,
-      filter: ['==', ['get', 'kind'], 'point'],
-      paint: {
-        'circle-color': '#000000',
-        'circle-opacity': 0.22,
-        'circle-blur': 0.75,
-        'circle-radius': ['+', ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 9, 22, 13], 4]
-      }
-    });
-
-    // Fehér gyűrű
-    map.addLayer({
-      id: 'cm-mylocation-ring',
-      type: 'circle',
-      source: MYLOC_SOURCE_ID,
-      filter: ['==', ['get', 'kind'], 'point'],
-      paint: {
-        'circle-color': 'rgba(255,255,255,0.98)',
-        'circle-radius': ['+', ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 9, 22, 13], 2]
-      }
-    });
-
-    // Pont (kék belső)
+    // Pont (circle)
     map.addLayer({
       id: MYLOC_POINT_LAYER_ID,
       type: 'circle',
@@ -1769,8 +1639,8 @@ async function ensureMyLocationLayer(){
       paint: {
         'circle-color': '#2563eb',
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 6, 18, 9, 22, 13],
-        'circle-stroke-width': 1,
-        'circle-stroke-color': 'rgba(0,0,0,0.18)'
+        'circle-stroke-width': 2,
+        'circle-stroke-color': 'rgba(255,255,255,0.95)'
       }
     });
 
@@ -1790,19 +1660,9 @@ async function ensureMyLocationLayer(){
     map.on('mouseenter', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
     map.on('mouseleave', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
 
-    map.on('click', MYLOC_HIT_LAYER_ID, (e) => {
+    map.on('click', MYLOC_HIT_LAYER_ID, () => {
       try {
         if (moveModeMarkerId) return;
-
-        // Ha a kattintás alatt marker is van, akkor a marker popup legyen az elsődleges.
-        try {
-          if (e && e.point && map && typeof map.queryRenderedFeatures === 'function') {
-            const hits = map.queryRenderedFeatures(e.point, { layers: [MARKERS_LAYER_ID] });
-            if (hits && hits.length) return;
-          }
-        } catch (_) {}
-
-        try { closeActiveMarkerPopup(); } catch (_) {}
         openMyLocationPopup();
       } catch (_) {}
     });
@@ -1854,7 +1714,6 @@ function closeMyLocationPopup(){
 function openMyLocationPopup(){
   if (!map || !lastMyLocation) return;
   try {
-    try { closeActiveMarkerPopup(); } catch (_) {}
     closeMyLocationPopup();
     const ll = [Number(lastMyLocation.lng), Number(lastMyLocation.lat)];
     const p = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: [0, -18] });
@@ -1919,16 +1778,8 @@ function closeActiveMarkerPopup(){
 function openMarkerPopup(m, lngLat){
   if (!map || !m) return;
   closeActiveMarkerPopup();
-  try { closeMyLocationPopup(); } catch (_) {}
 
-  let ll = null;
-  if (Array.isArray(lngLat) && lngLat.length >= 2) {
-    ll = [Number(lngLat[0]), Number(lngLat[1])];
-  } else if (lngLat && typeof lngLat === 'object' && ('lng' in lngLat) && ('lat' in lngLat)) {
-    ll = [Number(lngLat.lng), Number(lngLat.lat)];
-  } else {
-    ll = [Number(m.lng), Number(m.lat)];
-  }
+  const ll = lngLat ? [lngLat.lng, lngLat.lat] : [Number(m.lng), Number(m.lat)];
   const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: [0, -16] });
   popup.on('open', () => {
     try { wireMarkerPopupButtons(popup, m); } catch (_) {}
@@ -3297,20 +3148,6 @@ function offsetLatLng(lat, lng, bearing, meters) {
   const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
 
   return [toDeg(φ2), toDeg(λ2)];
-}
-
-
-// Kör polygon generálás (közelítő, WGS84) – koordináták: [lng,lat]
-function circlePolygonLngLat(lat, lng, radiusM, steps){
-  const pts = [];
-  const n = Math.max(12, Math.min(180, Number(steps) || 48));
-  for (let i = 0; i <= n; i++) {
-    const brg = (i / n) * 360;
-    const o = offsetLatLng(lat, lng, brg, radiusM);
-    // offsetLatLng visszaad: [lat,lng]
-    pts.push([Number(o[1]), Number(o[0])]);
-  }
-  return pts;
 }
 
 
