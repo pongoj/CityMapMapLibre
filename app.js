@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7";
+const APP_VERSION = "6.7.1";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -413,9 +413,31 @@ function _drawArrowCanvas(){
 function _ensureMapImage(name, canvas){
   if (!map || typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') return;
   try {
-    if (map.hasImage(name)) return;
-    map.addImage(name, canvas, { pixelRatio: 1 });
-  } catch (_) {}
+    const has = map.hasImage(name);
+
+    // MapLibre-ben a legstabilabb, ha ImageData-t adunk át (nem közvetlen canvas-t).
+    // (Egyes böngészőkben a canvas átadás "csendben" nem rajzol semmit.)
+    let img = canvas;
+    try {
+      const ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+      if (ctx && canvas.width && canvas.height) {
+        img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      }
+    } catch (_) {}
+
+    if (has) {
+      // Ha korábban a basemap-fallback beillesztett egy 1x1 üres képet, cseréljük le.
+      if (typeof map.updateImage === 'function') {
+        map.updateImage(name, img);
+      }
+      return;
+    }
+
+    map.addImage(name, img, { pixelRatio: 2 });
+  } catch (e) {
+    // ne állítsuk meg az appot, de legyen nyoma a konzolban
+    try { console.warn('addImage failed:', name, e); } catch (_) {}
+  }
 }
 
 function _ensureMarkerPinImagesFromMarkers(){
@@ -433,6 +455,38 @@ function _ensureMarkerPinImagesFromMarkers(){
 
 function _ensureMyLocArrowImage(){
   try { _ensureMapImage('cm-myloc-arrow', _drawArrowCanvas()); } catch (_) {}
+}
+
+// Ha a style (pl. újratöltés után) hiányzó ikonokra hivatkozik, itt pótoljuk őket.
+function _installCmStyleImageMissingHandlerOnce(){
+  if (!map || map.__cmStyleImgMissingInstalled) return;
+  map.__cmStyleImgMissingInstalled = true;
+  try {
+    map.on('styleimagemissing', (e) => {
+      try {
+        const id = e && e.id ? String(e.id) : '';
+        if (!id || !id.startsWith('cm-')) return;
+
+        if (id === 'cm-myloc-arrow') {
+          _ensureMyLocArrowImage();
+          return;
+        }
+
+        if (id === 'cm-pin-default') {
+          _ensureMapImage('cm-pin-default', _drawPinCanvas('#6b7280'));
+          return;
+        }
+
+        if (id.startsWith('cm-pin-')) {
+          const hex = id.slice('cm-pin-'.length);
+          const ok = /^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(hex);
+          const col = ok ? ('#' + hex) : '#6b7280';
+          _ensureMapImage(id, _drawPinCanvas(col));
+          return;
+        }
+      } catch (_) {}
+    });
+  } catch (_) {}
 }
 
 
@@ -1643,6 +1697,9 @@ async function ensureMarkersLayer(){
 
     map.addSource(MARKERS_SOURCE_ID, { type: 'geojson', data: _EMPTY_FC });
 
+    // CityMap ikonok pótlása style refresh esetén
+    _installCmStyleImageMissingHandlerOnce();
+
     // Canvas ikonok (pin) – ne kulso URL-bol!
     _ensureMarkerPinImagesFromMarkers();
 
@@ -1790,8 +1847,15 @@ async function ensureMyLocationLayer(){
 
     map.addSource(MYLOC_SOURCE_ID, { type: 'geojson', data: _EMPTY_MYLOC_FC });
 
+    // CityMap ikonok pótlása style refresh esetén
+    _installCmStyleImageMissingHandlerOnce();
+
     // Saját hely nyíl ikon (canvas)
     _ensureMyLocArrowImage();
+
+    // A saját hely rétegek legyenek a markerek alatt, hogy marker kattintásnál
+    // ne a saját hely "hit" réteg kapja el az eseményt.
+    const _beforeMarkers = (map.getLayer && map.getLayer(MARKERS_LAYER_ID)) ? MARKERS_LAYER_ID : undefined;
 
     map.addLayer({
       id: MYLOC_POINT_LAYER_ID,
@@ -1811,7 +1875,7 @@ async function ensureMyLocationLayer(){
       paint: {
         'icon-opacity': 1.0
       }
-    });
+    }, _beforeMarkers);
 
     // Láthatatlan "hit" réteg – könnyebb rákattintani mobilon
     map.addLayer({
@@ -1824,7 +1888,7 @@ async function ensureMyLocationLayer(){
         'circle-opacity': 0,
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 26, 22, 34]
       }
-    });
+    }, _beforeMarkers);
 
     map.on('mouseenter', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
     map.on('mouseleave', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
@@ -2600,11 +2664,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
   // v6.0.8: ha a basemap stílus hiányzó ikonokra hivatkozik, adjunk hozzá átlátszó 1x1 pixelt, hogy ne dobjon warningot
+  // FONTOS: a CityMap saját (cm- prefixű) ikonokat NEM szabad itt "lenullázni",
+  // mert különben a marker/saját hely ikonok 1x1 átlátszó pixellé válnak.
   try {
     map.on("styleimagemissing", (e) => {
       try {
         const id = e && e.id ? e.id : null;
         if (!id) return;
+        if (String(id).startsWith('cm-')) return; // CityMap custom icons
         if (map.hasImage && map.hasImage(id)) return;
         const empty = new Uint8Array([0,0,0,0]);
         map.addImage(id, { width: 1, height: 1, data: empty }, { pixelRatio: 1 });
