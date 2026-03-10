@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7.1";
+const APP_VERSION = "6.7.2";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -1709,7 +1709,7 @@ async function ensureMarkersLayer(){
       source: MARKERS_SOURCE_ID,
       layout: {
         'icon-image': ['coalesce', ['get', 'icon'], 'cm-pin-default'],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.55, 18, 0.72, 22, 0.92],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.95, 18, 1.25, 22, 1.55],
         'icon-anchor': 'bottom',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true
@@ -1721,64 +1721,6 @@ async function ensureMarkersLayer(){
 
     map.on('mouseenter', MARKERS_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
     map.on('mouseleave', MARKERS_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
-
-    map.on('click', MARKERS_LAYER_ID, async (e) => {
-      try {
-        if (moveModeMarkerId) return;
-
-        // Ha markerre kattintunk, a sajat hely popup NE jojjon elo.
-        try { closeMyLocationPopup(); } catch (_) {}
-
-        const pt = e && e.point ? e.point : null;
-        let feats = [];
-        try {
-          feats = (pt && map && typeof map.queryRenderedFeatures === 'function')
-            ? map.queryRenderedFeatures(pt, { layers: [MARKERS_LAYER_ID] })
-            : (e && e.features ? e.features : []);
-        } catch (_) {
-          feats = (e && e.features) ? e.features : [];
-        }
-        if (!feats || feats.length === 0) return;
-
-        // Fedesben levo ikonoknal valasszuk ki a kattintashoz legkozelebbit.
-        let best = null;
-        let bestD = Infinity;
-        for (const f of feats) {
-          const id = f && f.properties ? Number(f.properties.id) : NaN;
-          if (!Number.isFinite(id)) continue;
-
-          let d = 0;
-          try {
-            const coords = f && f.geometry && f.geometry.type === 'Point' ? f.geometry.coordinates : null;
-            if (coords && pt && map && typeof map.project === 'function') {
-              const p = map.project(coords);
-              const dx = p.x - pt.x;
-              const dy = p.y - pt.y;
-              d = Math.hypot(dx, dy);
-            }
-          } catch (_) {
-            d = 0;
-          }
-
-          if (d < bestD) {
-            bestD = d;
-            best = f;
-          }
-        }
-        if (!best) return;
-
-        const id = best && best.properties ? Number(best.properties.id) : NaN;
-        if (!Number.isFinite(id)) return;
-        const m = markersById.get(id) || await DB.getMarkerById(id);
-        if (!m || m.deletedAt) return;
-        markersById.set(id, m);
-
-        // Popup mindig a marker koordinatajan nyiljon (ne a kattintas pontjan).
-        openMarkerPopup(m, null);
-      } catch (err) {
-        console.warn('marker click failed', err);
-      }
-    });
 
     // Ha mar vannak betoltott markerek, azonnal rajzoljuk ki.
     try { refreshMarkersSource({ recalcColor: true }); } catch (_) { try { refreshMarkersSource(); } catch (_) {} }
@@ -1864,7 +1806,7 @@ async function ensureMyLocationLayer(){
       filter: ['==', ['get', 'kind'], 'point'],
       layout: {
         'icon-image': ['coalesce', ['get', 'icon'], 'cm-myloc-arrow'],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.55, 18, 0.72, 22, 0.92],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 1.05, 18, 1.35, 22, 1.70],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'icon-anchor': 'center',
@@ -1893,21 +1835,6 @@ async function ensureMyLocationLayer(){
     map.on('mouseenter', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
     map.on('mouseleave', MYLOC_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
 
-    map.on('click', MYLOC_HIT_LAYER_ID, (e) => {
-      try {
-        if (moveModeMarkerId) return;
-        // Ha marker is van a kattintas alatt, ne nyissunk sajat hely popupot.
-        try {
-          const pt = e && e.point ? e.point : null;
-          const mf = (pt && map && typeof map.queryRenderedFeatures === 'function')
-            ? map.queryRenderedFeatures(pt, { layers: [MARKERS_LAYER_ID] })
-            : [];
-          if (mf && mf.length > 0) return;
-        } catch (_) {}
-        openMyLocationPopup();
-      } catch (_) {}
-    });
-
     // Ha mar van pozicio, rajzoljuk ujra, mert eddig source hianyaban kimaradhatott.
     try {
       if (lastMyLocation && isFinite(lastMyLocation.lat) && isFinite(lastMyLocation.lng)) {
@@ -1931,6 +1858,108 @@ async function ensureMyLocationLayer(){
       }
     } catch (_) {}
   }
+}
+
+
+function _projectDistanceToFeaturePoint(point, feature){
+  try {
+    const coords = feature && feature.geometry && feature.geometry.type === 'Point' ? feature.geometry.coordinates : null;
+    if (!coords || !map || typeof map.project !== 'function' || !point) return Infinity;
+    const p = map.project(coords);
+    const dx = p.x - point.x;
+    const dy = p.y - point.y;
+    return Math.hypot(dx, dy);
+  } catch (_) {
+    return Infinity;
+  }
+}
+
+function _queryLayerFeaturesNearPoint(layerId, point, padPx){
+  try {
+    if (!map || typeof map.queryRenderedFeatures !== 'function' || !point) return [];
+    const pad = Math.max(0, Number(padPx) || 0);
+    const bbox = pad > 0
+      ? [[point.x - pad, point.y - pad], [point.x + pad, point.y + pad]]
+      : point;
+    return map.queryRenderedFeatures(bbox, { layers: [layerId] }) || [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function _pickNearestMarkerFeatureAtPoint(point){
+  const feats = _queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, point, 6);
+  if (!feats.length) return null;
+
+  let best = null;
+  let bestD = Infinity;
+  for (const f of feats) {
+    const id = f && f.properties ? Number(f.properties.id) : NaN;
+    if (!Number.isFinite(id)) continue;
+    const d = _projectDistanceToFeaturePoint(point, f);
+    if (d < bestD) {
+      bestD = d;
+      best = f;
+    }
+  }
+
+  // Vedjuk ki azt az esetet is, amikor a symbol hitbox tevesen nagyobb teruletet fogna.
+  return (best && bestD <= 28) ? best : null;
+}
+
+function _pickMyLocationFeatureAtPoint(point){
+  const feats = _queryLayerFeaturesNearPoint(MYLOC_HIT_LAYER_ID, point, 4);
+  if (!feats.length) return null;
+
+  let best = null;
+  let bestD = Infinity;
+  for (const f of feats) {
+    const d = _projectDistanceToFeaturePoint(point, f);
+    if (d < bestD) {
+      bestD = d;
+      best = f;
+    }
+  }
+
+  return (best && bestD <= 26) ? best : null;
+}
+
+function installMapFeatureClickHandlerOnce(){
+  if (!map || map.__cmFeatureClickInstalled) return;
+  map.__cmFeatureClickInstalled = true;
+
+  map.on('click', async (e) => {
+    try {
+      if (moveModeMarkerId) return;
+      const point = e && e.point ? e.point : null;
+      if (!point) return;
+
+      const markerFeature = _pickNearestMarkerFeatureAtPoint(point);
+      if (markerFeature) {
+        try { closeMyLocationPopup(); } catch (_) {}
+        const id = markerFeature && markerFeature.properties ? Number(markerFeature.properties.id) : NaN;
+        if (!Number.isFinite(id)) return;
+        const m = markersById.get(id) || await DB.getMarkerById(id);
+        if (!m || m.deletedAt) return;
+        markersById.set(id, m);
+        openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
+        return;
+      }
+
+      const myLocFeature = _pickMyLocationFeatureAtPoint(point);
+      if (myLocFeature && lastMyLocation) {
+        try { closeActiveMarkerPopup(); } catch (_) {}
+        openMyLocationPopup();
+        return;
+      }
+
+      // Ures terkepkattintas: zarjuk be a popupokat.
+      try { closeActiveMarkerPopup(); } catch (_) {}
+      try { closeMyLocationPopup(); } catch (_) {}
+    } catch (err) {
+      console.warn('feature click handler failed', err);
+    }
+  });
 }
 
 function myLocationPopupHtml(){
@@ -3046,6 +3075,7 @@ if (navBtn) {
 
   await ensureMarkersLayer();
   await ensureMyLocationLayer();
+  installMapFeatureClickHandlerOnce();
 
   await loadMarkers();
 
