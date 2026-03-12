@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7.2";
+const APP_VERSION = "6.7.3";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -291,6 +291,7 @@ const markersById = new Map(); // id -> marker record (active)
 // GeoJSON markers layer (DOM marker helyett)
 const MARKERS_SOURCE_ID = "cm-markers";
 const MARKERS_LAYER_ID = "cm-markers-layer";
+const MARKERS_HIT_LAYER_ID = "cm-markers-hit";
 
 // Saját hely GeoJSON layer (DOM marker helyett)
 const MYLOC_SOURCE_ID = "cm-mylocation";
@@ -325,47 +326,39 @@ function _makeCanvas(size){
 }
 
 function _drawPinCanvas(fillColor){
-  const size = 64;
+  const size = 80;
   const c = _makeCanvas(size);
   const ctx = c.getContext('2d');
   if (!ctx) return c;
   ctx.clearRect(0, 0, size, size);
 
   const cx = size / 2;
-  const topY = size * 0.16;
-  const tipY = size * 0.96;
+  const cy = size * 0.33;
+  const r = size * 0.24;
+  const tipY = size * 0.92;
 
-  // Shadow
+  // Soft shadow under marker (like the sample image)
   ctx.save();
-  ctx.translate(0, 2);
   ctx.beginPath();
-  ctx.moveTo(cx, tipY);
-  ctx.bezierCurveTo(cx - size*0.28, size*0.72, cx - size*0.30, size*0.38, cx, topY);
-  ctx.bezierCurveTo(cx + size*0.30, size*0.38, cx + size*0.28, size*0.72, cx, tipY);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.ellipse(cx, size * 0.93, size * 0.19, size * 0.035, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
   ctx.fill();
   ctx.restore();
 
-  // Pin body
+  // Pin body - closer to the sample shape
   ctx.beginPath();
   ctx.moveTo(cx, tipY);
-  ctx.bezierCurveTo(cx - size*0.28, size*0.72, cx - size*0.30, size*0.38, cx, topY);
-  ctx.bezierCurveTo(cx + size*0.30, size*0.38, cx + size*0.28, size*0.72, cx, tipY);
+  ctx.bezierCurveTo(cx - size * 0.15, size * 0.73, cx - size * 0.30, size * 0.56, cx - size * 0.30, cy);
+  ctx.arc(cx, cy, r, Math.PI, 0, false);
+  ctx.bezierCurveTo(cx + size * 0.30, size * 0.56, cx + size * 0.15, size * 0.73, cx, tipY);
   ctx.closePath();
-
-  ctx.fillStyle = String(fillColor || '#ef4444');
+  ctx.fillStyle = String(fillColor || '#e53935');
   ctx.fill();
 
-  // White border
-  ctx.lineWidth = Math.max(3, Math.round(size * 0.06));
-  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-  ctx.stroke();
-
-  // Inner hole
+  // Inner white hole
   ctx.beginPath();
-  ctx.arc(cx, size * 0.38, size * 0.12, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.arc(cx, cy, size * 0.135, 0, Math.PI * 2);
+  ctx.fillStyle = '#f4f4f4';
   ctx.fill();
 
   return c;
@@ -1704,12 +1697,23 @@ async function ensureMarkersLayer(){
     _ensureMarkerPinImagesFromMarkers();
 
     map.addLayer({
+      id: MARKERS_HIT_LAYER_ID,
+      type: 'circle',
+      source: MARKERS_SOURCE_ID,
+      paint: {
+        'circle-color': '#000000',
+        'circle-opacity': 0,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 24, 22, 30]
+      }
+    });
+
+    map.addLayer({
       id: MARKERS_LAYER_ID,
       type: 'symbol',
       source: MARKERS_SOURCE_ID,
       layout: {
         'icon-image': ['coalesce', ['get', 'icon'], 'cm-pin-default'],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.95, 18, 1.25, 22, 1.55],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 1.10, 18, 1.45, 22, 1.80],
         'icon-anchor': 'bottom',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true
@@ -1719,8 +1723,8 @@ async function ensureMarkersLayer(){
       }
     });
 
-    map.on('mouseenter', MARKERS_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
-    map.on('mouseleave', MARKERS_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
+    map.on('mouseenter', MARKERS_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = 'pointer'; } catch (_) {} });
+    map.on('mouseleave', MARKERS_HIT_LAYER_ID, () => { try { map.getCanvas().style.cursor = ''; } catch (_) {} });
 
     // Ha mar vannak betoltott markerek, azonnal rajzoljuk ki.
     try { refreshMarkersSource({ recalcColor: true }); } catch (_) { try { refreshMarkersSource(); } catch (_) {} }
@@ -1888,7 +1892,10 @@ function _queryLayerFeaturesNearPoint(layerId, point, padPx){
 }
 
 function _pickNearestMarkerFeatureAtPoint(point){
-  const feats = _queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, point, 6);
+  const feats = [
+    ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, point, 8),
+    ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, point, 14)
+  ];
   if (!feats.length) return null;
 
   let best = null;
@@ -1896,32 +1903,59 @@ function _pickNearestMarkerFeatureAtPoint(point){
   for (const f of feats) {
     const id = f && f.properties ? Number(f.properties.id) : NaN;
     if (!Number.isFinite(id)) continue;
-    const d = _projectDistanceToFeaturePoint(point, f);
+
+    // A pin ikon bottom-anchoros, a kattintható vizuális közép ezért feljebb van.
+    let d = Infinity;
+    try {
+      const coords = f && f.geometry && f.geometry.type === 'Point' ? f.geometry.coordinates : null;
+      if (coords && map && typeof map.project === 'function') {
+        const p = map.project(coords);
+        const z = (typeof map.getZoom === 'function') ? Number(map.getZoom()) : 18;
+        const lift = z >= 20 ? 30 : (z >= 18 ? 26 : 22);
+        const dx = p.x - point.x;
+        const dy = (p.y - lift) - point.y;
+        d = Math.hypot(dx, dy);
+      }
+    } catch (_) {}
+    if (!isFinite(d)) d = _projectDistanceToFeaturePoint(point, f);
+
     if (d < bestD) {
       bestD = d;
       best = f;
     }
   }
 
-  // Vedjuk ki azt az esetet is, amikor a symbol hitbox tevesen nagyobb teruletet fogna.
-  return (best && bestD <= 28) ? best : null;
+  return (best && bestD <= 34) ? best : null;
 }
 
 function _pickMyLocationFeatureAtPoint(point){
-  const feats = _queryLayerFeaturesNearPoint(MYLOC_HIT_LAYER_ID, point, 4);
+  const feats = [
+    ..._queryLayerFeaturesNearPoint(MYLOC_POINT_LAYER_ID, point, 8),
+    ..._queryLayerFeaturesNearPoint(MYLOC_HIT_LAYER_ID, point, 12)
+  ];
   if (!feats.length) return null;
 
   let best = null;
   let bestD = Infinity;
   for (const f of feats) {
-    const d = _projectDistanceToFeaturePoint(point, f);
+    let d = Infinity;
+    try {
+      const coords = f && f.geometry && f.geometry.type === 'Point' ? f.geometry.coordinates : null;
+      if (coords && map && typeof map.project === 'function') {
+        const p = map.project(coords);
+        const dx = p.x - point.x;
+        const dy = p.y - point.y;
+        d = Math.hypot(dx, dy);
+      }
+    } catch (_) {}
+    if (!isFinite(d)) d = _projectDistanceToFeaturePoint(point, f);
     if (d < bestD) {
       bestD = d;
       best = f;
     }
   }
 
-  return (best && bestD <= 26) ? best : null;
+  return (best && bestD <= 34) ? best : null;
 }
 
 function installMapFeatureClickHandlerOnce(){
@@ -1986,7 +2020,7 @@ function openMyLocationPopup(){
   try {
     closeMyLocationPopup();
     const ll = [Number(lastMyLocation.lng), Number(lastMyLocation.lat)];
-    const p = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: [0, -18] });
+    const p = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: [0, -22] });
     p.setLngLat(ll).setHTML(myLocationPopupHtml()).addTo(map);
     myLocationPopup = p;
   } catch (_) {}
@@ -2050,7 +2084,7 @@ function openMarkerPopup(m, lngLat){
   closeActiveMarkerPopup();
 
   const ll = lngLat ? [lngLat.lng, lngLat.lat] : [Number(m.lng), Number(m.lat)];
-  const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: [0, -16] });
+  const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: [0, -20] });
   popup.on('open', () => {
     try { wireMarkerPopupButtons(popup, m); } catch (_) {}
   });
