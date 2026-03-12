@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7.3";
+const APP_VERSION = "6.7.4";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -326,39 +326,39 @@ function _makeCanvas(size){
 }
 
 function _drawPinCanvas(fillColor){
-  const size = 80;
+  const size = 72;
   const c = _makeCanvas(size);
   const ctx = c.getContext('2d');
   if (!ctx) return c;
   ctx.clearRect(0, 0, size, size);
 
   const cx = size / 2;
-  const cy = size * 0.33;
-  const r = size * 0.24;
-  const tipY = size * 0.92;
+  const cy = size * 0.30;
+  const r = size * 0.21;
+  const tipY = size * 0.90;
 
-  // Soft shadow under marker (like the sample image)
+  // shadow
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(cx, size * 0.93, size * 0.19, size * 0.035, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  ctx.ellipse(cx, size * 0.92, size * 0.16, size * 0.03, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
   ctx.fill();
   ctx.restore();
 
-  // Pin body - closer to the sample shape
+  // body - closer to the sample image
   ctx.beginPath();
   ctx.moveTo(cx, tipY);
-  ctx.bezierCurveTo(cx - size * 0.15, size * 0.73, cx - size * 0.30, size * 0.56, cx - size * 0.30, cy);
+  ctx.bezierCurveTo(cx - size * 0.12, size * 0.70, cx - size * 0.27, size * 0.54, cx - size * 0.27, cy);
   ctx.arc(cx, cy, r, Math.PI, 0, false);
-  ctx.bezierCurveTo(cx + size * 0.30, size * 0.56, cx + size * 0.15, size * 0.73, cx, tipY);
+  ctx.bezierCurveTo(cx + size * 0.27, size * 0.54, cx + size * 0.12, size * 0.70, cx, tipY);
   ctx.closePath();
   ctx.fillStyle = String(fillColor || '#e53935');
   ctx.fill();
 
-  // Inner white hole
+  // inner hole
   ctx.beginPath();
-  ctx.arc(cx, cy, size * 0.135, 0, Math.PI * 2);
-  ctx.fillStyle = '#f4f4f4';
+  ctx.arc(cx, cy, size * 0.12, 0, Math.PI * 2);
+  ctx.fillStyle = '#f2f2f2';
   ctx.fill();
 
   return c;
@@ -1713,7 +1713,7 @@ async function ensureMarkersLayer(){
       source: MARKERS_SOURCE_ID,
       layout: {
         'icon-image': ['coalesce', ['get', 'icon'], 'cm-pin-default'],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 1.10, 18, 1.45, 22, 1.80],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.92, 18, 1.18, 22, 1.45],
         'icon-anchor': 'bottom',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true
@@ -1958,40 +1958,83 @@ function _pickMyLocationFeatureAtPoint(point){
   return (best && bestD <= 34) ? best : null;
 }
 
+let _skipEmptyMapClickUntil = 0;
+
 function installMapFeatureClickHandlerOnce(){
   if (!map || map.__cmFeatureClickInstalled) return;
   map.__cmFeatureClickInstalled = true;
 
-  map.on('click', async (e) => {
+  map.on('click', MARKERS_HIT_LAYER_ID, async (e) => {
     try {
       if (moveModeMarkerId) return;
-      const point = e && e.point ? e.point : null;
-      if (!point) return;
+      _skipEmptyMapClickUntil = Date.now() + 250;
+      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
+      try { closeMyLocationPopup(); } catch (_) {}
 
-      const markerFeature = _pickNearestMarkerFeatureAtPoint(point);
-      if (markerFeature) {
-        try { closeMyLocationPopup(); } catch (_) {}
-        const id = markerFeature && markerFeature.properties ? Number(markerFeature.properties.id) : NaN;
-        if (!Number.isFinite(id)) return;
-        const m = markersById.get(id) || await DB.getMarkerById(id);
-        if (!m || m.deletedAt) return;
-        markersById.set(id, m);
-        openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
-        return;
+      const pt = e && e.point ? e.point : null;
+      const feats = pt ? [
+        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
+        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
+      ] : (e && e.features ? e.features : []);
+      if (!feats || !feats.length) return;
+
+      let best = null;
+      let bestD = Infinity;
+      for (const f of feats) {
+        const id = f && f.properties ? Number(f.properties.id) : NaN;
+        if (!Number.isFinite(id)) continue;
+        const d = _projectDistanceToFeaturePoint(pt, f);
+        if (d < bestD) { bestD = d; best = f; }
       }
+      if (!best) return;
 
-      const myLocFeature = _pickMyLocationFeatureAtPoint(point);
-      if (myLocFeature && lastMyLocation) {
-        try { closeActiveMarkerPopup(); } catch (_) {}
-        openMyLocationPopup();
-        return;
-      }
+      const id = Number(best.properties.id);
+      const m = markersById.get(id) || await DB.getMarkerById(id);
+      if (!m || m.deletedAt) return;
+      markersById.set(id, m);
+      openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
+    } catch (err) {
+      console.warn('marker hit click failed', err);
+    }
+  });
 
-      // Ures terkepkattintas: zarjuk be a popupokat.
+  map.on('click', MYLOC_HIT_LAYER_ID, (e) => {
+    try {
+      if (moveModeMarkerId || !lastMyLocation) return;
+      _skipEmptyMapClickUntil = Date.now() + 250;
+      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
+
+      const pt = e && e.point ? e.point : null;
+      const markerHere = pt ? [
+        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
+        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
+      ] : [];
+      if (markerHere && markerHere.length) return;
+
+      try { closeActiveMarkerPopup(); } catch (_) {}
+      openMyLocationPopup();
+    } catch (err) {
+      console.warn('my location hit click failed', err);
+    }
+  });
+
+  map.on('click', (e) => {
+    try {
+      if (moveModeMarkerId) return;
+      if (Date.now() < _skipEmptyMapClickUntil) return;
+      const pt = e && e.point ? e.point : null;
+      if (!pt) return;
+
+      const markerHere = _pickNearestMarkerFeatureAtPoint(pt);
+      if (markerHere) return;
+
+      const myLocHere = _pickMyLocationFeatureAtPoint(pt);
+      if (myLocHere && lastMyLocation) return;
+
       try { closeActiveMarkerPopup(); } catch (_) {}
       try { closeMyLocationPopup(); } catch (_) {}
     } catch (err) {
-      console.warn('feature click handler failed', err);
+      console.warn('empty map click handler failed', err);
     }
   });
 }
