@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7.6";
+const APP_VERSION = "6.7.4";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -1799,11 +1799,9 @@ async function ensureMyLocationLayer(){
     // Saját hely nyíl ikon (canvas)
     _ensureMyLocArrowImage();
 
-    // A saját hely rétegek legyenek a markerek *és a marker hit layer* alatt,
-    // hogy marker kattintásnál biztosan ne a saját hely "hit" réteg kapja el az eseményt.
-    const _beforeMarkers = (map.getLayer && map.getLayer(MARKERS_HIT_LAYER_ID))
-      ? MARKERS_HIT_LAYER_ID
-      : ((map.getLayer && map.getLayer(MARKERS_LAYER_ID)) ? MARKERS_LAYER_ID : undefined);
+    // A saját hely rétegek legyenek a markerek alatt, hogy marker kattintásnál
+    // ne a saját hely "hit" réteg kapja el az eseményt.
+    const _beforeMarkers = (map.getLayer && map.getLayer(MARKERS_LAYER_ID)) ? MARKERS_LAYER_ID : undefined;
 
     map.addLayer({
       id: MYLOC_POINT_LAYER_ID,
