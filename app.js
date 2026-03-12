@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7.4";
+const APP_VERSION = "6.7.5";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -302,6 +302,10 @@ const MYLOC_HIT_LAYER_ID = "cm-mylocation-hit";
 
 let activeMarkerPopup = null;
 let activePopupMarkerId = null;
+const CM_PIN_TEMPLATE_URL = "./icons/pin-template.png";
+let _pinTemplateImg = null;
+let _pinTemplateReady = false;
+let _pinTemplateLoading = false;
 
 // === Marker ikonok (MapLibre symbol layer) ===
 // Kizárólag a kért két módosítás:
@@ -326,42 +330,102 @@ function _makeCanvas(size){
 }
 
 function _drawPinCanvas(fillColor){
-  const size = 72;
+  const size = 64;
   const c = _makeCanvas(size);
   const ctx = c.getContext('2d');
   if (!ctx) return c;
   ctx.clearRect(0, 0, size, size);
 
-  const cx = size / 2;
-  const cy = size * 0.30;
-  const r = size * 0.21;
-  const tipY = size * 0.90;
+  const fallbackVector = () => {
+    const cx = size / 2;
+    const cy = size * 0.26;
+    const r = size * 0.17;
+    const tipY = size * 0.88;
+    ctx.beginPath();
+    ctx.moveTo(cx, tipY);
+    ctx.bezierCurveTo(cx - size * 0.10, size * 0.67, cx - size * 0.22, size * 0.53, cx - size * 0.22, cy);
+    ctx.arc(cx, cy, r, Math.PI, 0, false);
+    ctx.bezierCurveTo(cx + size * 0.22, size * 0.53, cx + size * 0.10, size * 0.67, cx, tipY);
+    ctx.closePath();
+    ctx.fillStyle = String(fillColor || '#e53935');
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.10, 0, Math.PI * 2);
+    ctx.fillStyle = '#f4f4f4';
+    ctx.fill();
+  };
 
-  // shadow
-  ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(cx, size * 0.92, size * 0.16, size * 0.03, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.14)';
-  ctx.fill();
-  ctx.restore();
+  if (!_pinTemplateReady || !_pinTemplateImg) {
+    fallbackVector();
+    return c;
+  }
 
-  // body - closer to the sample image
-  ctx.beginPath();
-  ctx.moveTo(cx, tipY);
-  ctx.bezierCurveTo(cx - size * 0.12, size * 0.70, cx - size * 0.27, size * 0.54, cx - size * 0.27, cy);
-  ctx.arc(cx, cy, r, Math.PI, 0, false);
-  ctx.bezierCurveTo(cx + size * 0.27, size * 0.54, cx + size * 0.12, size * 0.70, cx, tipY);
-  ctx.closePath();
-  ctx.fillStyle = String(fillColor || '#e53935');
-  ctx.fill();
-
-  // inner hole
-  ctx.beginPath();
-  ctx.arc(cx, cy, size * 0.12, 0, Math.PI * 2);
-  ctx.fillStyle = '#f2f2f2';
-  ctx.fill();
-
+  try {
+    ctx.drawImage(_pinTemplateImg, 0, 0, size, size);
+    const img = ctx.getImageData(0, 0, size, size);
+    const data = img.data;
+    const hex = String(fillColor || '#e53935').trim();
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex) || /^#?([0-9a-f]{3})$/i.exec(hex);
+    let rFill = 229, gFill = 57, bFill = 53;
+    if (m) {
+      let h = m[1];
+      if (h.length === 3) h = h.split('').map(ch => ch + ch).join('')
+      rFill = parseInt(h.slice(0, 2), 16);
+      gFill = parseInt(h.slice(2, 4), 16);
+      bFill = parseInt(h.slice(4, 6), 16);
+    }
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+      if (!a) continue;
+      const maxc = Math.max(r, g, b), minc = Math.min(r, g, b);
+      const sat = maxc - minc;
+      const isRedMarker = r > 120 && r > g + 18 && r > b + 18;
+      const isBg = maxc > 220 && sat < 18;
+      if (isRedMarker) {
+        data[i] = rFill;
+        data[i + 1] = gFill;
+        data[i + 2] = bFill;
+        continue;
+      }
+      if (isBg) {
+        data[i + 3] = 0;
+        continue;
+      }
+      // leave the inner hole as light gray/white
+      if (maxc > 170 && sat < 45) {
+        data[i] = 244;
+        data[i + 1] = 244;
+        data[i + 2] = 244;
+        data[i + 3] = Math.max(data[i + 3], 235);
+        continue;
+      }
+      data[i + 3] = 0;
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (_) {
+    ctx.clearRect(0, 0, size, size);
+    fallbackVector();
+  }
   return c;
+}
+
+function _ensurePinTemplateLoaded(){
+  if (_pinTemplateReady || _pinTemplateLoading) return;
+  _pinTemplateLoading = true;
+  try {
+    const img = new Image();
+    img.onload = () => {
+      _pinTemplateImg = img;
+      _pinTemplateReady = true;
+      _pinTemplateLoading = false;
+      try { _ensureMarkerPinImagesFromMarkers(); } catch (_) {}
+      try { refreshMarkersSource({ recalcColor: true }); } catch (_) { try { refreshMarkersSource(); } catch (_) {} }
+    };
+    img.onerror = () => { _pinTemplateLoading = false; };
+    img.src = CM_PIN_TEMPLATE_URL + '?v=' + encodeURIComponent(APP_VERSION);
+  } catch (_) {
+    _pinTemplateLoading = false;
+  }
 }
 
 function _drawArrowCanvas(){
@@ -435,6 +499,7 @@ function _ensureMapImage(name, canvas){
 
 function _ensureMarkerPinImagesFromMarkers(){
   if (!map) return;
+  _ensurePinTemplateLoaded();
   try {
     _ensureMapImage('cm-pin-default', _drawPinCanvas('#6b7280'));
     for (const [, m] of markersById.entries()) {
@@ -1703,7 +1768,7 @@ async function ensureMarkersLayer(){
       paint: {
         'circle-color': '#000000',
         'circle-opacity': 0,
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 24, 22, 30]
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 10, 18, 12, 22, 14]
       }
     });
 
@@ -1713,7 +1778,7 @@ async function ensureMarkersLayer(){
       source: MARKERS_SOURCE_ID,
       layout: {
         'icon-image': ['coalesce', ['get', 'icon'], 'cm-pin-default'],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.92, 18, 1.18, 22, 1.45],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.72, 18, 0.88, 22, 1.02],
         'icon-anchor': 'bottom',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true
@@ -1832,7 +1897,7 @@ async function ensureMyLocationLayer(){
       paint: {
         'circle-color': '#000000',
         'circle-opacity': 0,
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 26, 22, 34]
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 8, 18, 10, 22, 12]
       }
     }, _beforeMarkers);
 
@@ -1893,8 +1958,8 @@ function _queryLayerFeaturesNearPoint(layerId, point, padPx){
 
 function _pickNearestMarkerFeatureAtPoint(point){
   const feats = [
-    ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, point, 8),
-    ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, point, 14)
+    ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, point, 6),
+    ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, point, 10)
   ];
   if (!feats.length) return null;
 
@@ -1925,13 +1990,13 @@ function _pickNearestMarkerFeatureAtPoint(point){
     }
   }
 
-  return (best && bestD <= 34) ? best : null;
+  return (best && bestD <= 22) ? best : null;
 }
 
 function _pickMyLocationFeatureAtPoint(point){
   const feats = [
-    ..._queryLayerFeaturesNearPoint(MYLOC_POINT_LAYER_ID, point, 8),
-    ..._queryLayerFeaturesNearPoint(MYLOC_HIT_LAYER_ID, point, 12)
+    ..._queryLayerFeaturesNearPoint(MYLOC_POINT_LAYER_ID, point, 4),
+    ..._queryLayerFeaturesNearPoint(MYLOC_HIT_LAYER_ID, point, 8)
   ];
   if (!feats.length) return null;
 
@@ -1955,7 +2020,7 @@ function _pickMyLocationFeatureAtPoint(point){
     }
   }
 
-  return (best && bestD <= 34) ? best : null;
+  return (best && bestD <= 16) ? best : null;
 }
 
 let _skipEmptyMapClickUntil = 0;
@@ -1964,77 +2029,35 @@ function installMapFeatureClickHandlerOnce(){
   if (!map || map.__cmFeatureClickInstalled) return;
   map.__cmFeatureClickInstalled = true;
 
-  map.on('click', MARKERS_HIT_LAYER_ID, async (e) => {
+  map.on('click', async (e) => {
     try {
       if (moveModeMarkerId) return;
-      _skipEmptyMapClickUntil = Date.now() + 250;
-      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
-      try { closeMyLocationPopup(); } catch (_) {}
-
-      const pt = e && e.point ? e.point : null;
-      const feats = pt ? [
-        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
-        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
-      ] : (e && e.features ? e.features : []);
-      if (!feats || !feats.length) return;
-
-      let best = null;
-      let bestD = Infinity;
-      for (const f of feats) {
-        const id = f && f.properties ? Number(f.properties.id) : NaN;
-        if (!Number.isFinite(id)) continue;
-        const d = _projectDistanceToFeaturePoint(pt, f);
-        if (d < bestD) { bestD = d; best = f; }
-      }
-      if (!best) return;
-
-      const id = Number(best.properties.id);
-      const m = markersById.get(id) || await DB.getMarkerById(id);
-      if (!m || m.deletedAt) return;
-      markersById.set(id, m);
-      openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
-    } catch (err) {
-      console.warn('marker hit click failed', err);
-    }
-  });
-
-  map.on('click', MYLOC_HIT_LAYER_ID, (e) => {
-    try {
-      if (moveModeMarkerId || !lastMyLocation) return;
-      _skipEmptyMapClickUntil = Date.now() + 250;
-      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
-
-      const pt = e && e.point ? e.point : null;
-      const markerHere = pt ? [
-        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
-        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
-      ] : [];
-      if (markerHere && markerHere.length) return;
-
-      try { closeActiveMarkerPopup(); } catch (_) {}
-      openMyLocationPopup();
-    } catch (err) {
-      console.warn('my location hit click failed', err);
-    }
-  });
-
-  map.on('click', (e) => {
-    try {
-      if (moveModeMarkerId) return;
-      if (Date.now() < _skipEmptyMapClickUntil) return;
       const pt = e && e.point ? e.point : null;
       if (!pt) return;
 
       const markerHere = _pickNearestMarkerFeatureAtPoint(pt);
-      if (markerHere) return;
+      if (markerHere) {
+        try { closeMyLocationPopup(); } catch (_) {}
+        const id = markerHere && markerHere.properties ? Number(markerHere.properties.id) : NaN;
+        if (!Number.isFinite(id)) return;
+        const m = markersById.get(id) || await DB.getMarkerById(id);
+        if (!m || m.deletedAt) return;
+        markersById.set(id, m);
+        openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
+        return;
+      }
 
       const myLocHere = _pickMyLocationFeatureAtPoint(pt);
-      if (myLocHere && lastMyLocation) return;
+      if (myLocHere && lastMyLocation) {
+        try { closeActiveMarkerPopup(); } catch (_) {}
+        openMyLocationPopup();
+        return;
+      }
 
       try { closeActiveMarkerPopup(); } catch (_) {}
       try { closeMyLocationPopup(); } catch (_) {}
     } catch (err) {
-      console.warn('empty map click handler failed', err);
+      console.warn('map feature click handler failed', err);
     }
   });
 }
