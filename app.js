@@ -1,4 +1,4 @@
-const APP_VERSION = "6.8.2";
+const APP_VERSION = "6.9";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -871,8 +871,17 @@ const GPS_DEADZONE_MIN_M = 4;       // ennyi alatt (állva) ne mozduljon
 const GPS_DEADZONE_MAX_M = 10;      // deadzone felső korlát
 const GPS_JUMP_REJECT_M = 120;      // irreális ugrás eldobása (ha túl gyors)
 const GPS_MARKER_ANIM_MS = 650;     // marker animáció időtartam
-const GPS_CENTER_ANIM_S = 0.55;     // térkép pan animáció
-const GPS_MIN_CENTER_INTERVAL_MS = 650;
+const GPS_CENTER_ANIM_S = 0.42;     // térkép pan animáció
+const GPS_MIN_CENTER_INTERVAL_MS = 900;
+
+// MapLibre telefonos nav stabilizálás:
+// - mozgás közben inkább GPS/course heading
+// - állva inkább iránytű, de nagyobb hiszterézissel
+// - a saját hely nyíl viewport-aligned, heading módban fixen felfelé mutat
+const NAV_MOVE_SPEED_MPS = 1.6;
+const NAV_MOVE_SPEED_STALE_MS = 4000;
+const NAV_COMPASS_STATIONARY_DEADBAND_DEG = 10;
+const NAV_COMPASS_MOVING_DEADBAND_DEG = 4;
 
 let myLocFollowEnabled = true;
 // v5.41: Navigáció mód (térkép követés viselkedése)
@@ -1022,11 +1031,45 @@ let _motionInited = false;
 let lastSpeedMps = NaN;
 let lastSpeedTs = 0;
 
-function _shouldUseCompassHeading(){
+function _recentSpeedMps(){
   try {
     const now = Date.now();
-    if (isFinite(lastSpeedMps) && lastSpeedMps >= 1.2 && (now - lastSpeedTs) < 5000) return false;
+    if (isFinite(lastSpeedMps) && (now - lastSpeedTs) < NAV_MOVE_SPEED_STALE_MS) return Number(lastSpeedMps);
   } catch (_) {}
+  return NaN;
+}
+
+function _isMovingForNav(){
+  const s = _recentSpeedMps();
+  return isFinite(s) && s >= NAV_MOVE_SPEED_MPS;
+}
+
+function _shouldUseCompassHeading(){
+  return !_isMovingForNav();
+}
+
+function _smoothHeadingToward(targetDeg, sourceKind){
+  if (!(typeof targetDeg === "number" && isFinite(targetDeg))) return false;
+  const target = _normDeg(targetDeg);
+  if (!(typeof lastHeadingDeg === "number" && isFinite(lastHeadingDeg))) {
+    lastHeadingDeg = target;
+    return true;
+  }
+
+  const moving = _isMovingForNav();
+  const delta = shortestAngleDelta(lastHeadingDeg, target);
+  const absd = Math.abs(delta);
+  const dead = moving ? NAV_COMPASS_MOVING_DEADBAND_DEG : NAV_COMPASS_STATIONARY_DEADBAND_DEG;
+  if (absd < dead) return false;
+
+  let alpha;
+  if (sourceKind === 'geo') {
+    alpha = moving ? (absd > 35 ? 0.45 : absd > 15 ? 0.30 : 0.20) : (absd > 35 ? 0.28 : 0.16);
+  } else {
+    alpha = moving ? (absd > 35 ? 0.30 : absd > 15 ? 0.18 : 0.12) : (absd > 35 ? 0.18 : absd > 15 ? 0.12 : 0.08);
+  }
+
+  lastHeadingDeg = _normDeg(lastHeadingDeg + delta * alpha);
   return true;
 }
 
@@ -1048,11 +1091,11 @@ function _getScreenAngle(){
   return 0;
 }
 
-function _updateMyLocIconHeading(){
+function _updateMyLocIconHeading(force = false){
   // v6.3: Saját hely DOM marker helyett GeoJSON layer – heading frissítés
   if (!map || !lastMyLocation) return;
   try {
-    setMyLocationGeoData(lastMyLocation.lat, lastMyLocation.lng, lastHeadingDeg, lastMyLocationAccM, { force: false, headingOnly: true });
+    setMyLocationGeoData(lastMyLocation.lat, lastMyLocation.lng, lastHeadingDeg, lastMyLocationAccM, { force: !!force, headingOnly: !force });
   } catch (_) {}
 }
 
@@ -1124,71 +1167,28 @@ function _handleDeviceOrientation(e){
       }
     }
   }
-
-  // v5.42.4: ha van giroszkóp, a forgást az integrált yaw adja (sokkal simább),
-  // a kompasz csak lassan korrigál (drift ellen). Ha nincs gyro, marad a kompasz.
-  if (!_gyroAvailable || !isFinite(gyroHeadingDeg)) {
-    fusedHeadingDeg = compassHeadingDeg;
-  } else if (isFinite(compassHeadingDeg)) {
-    // apró korrekció itt is, ha a devicemotion ritka
-    const d = shortestAngleDelta(gyroHeadingDeg, compassHeadingDeg);
-    gyroHeadingDeg = _normDeg(gyroHeadingDeg + d * 0.02);
-    fusedHeadingDeg = gyroHeadingDeg;
-  } else {
-    fusedHeadingDeg = gyroHeadingDeg;
-  }
+  // Telefonon a giroszkóp integráció több készüléken zajos / előjelesen hibás.
+  // Ezért a tényleges nav headinghez itt a kisimított iránytűt használjuk,
+  // mozgás közben pedig a watchPosition GPS/course heading veheti át a szerepet.
+  fusedHeadingDeg = compassHeadingDeg;
 
   if (_shouldUseCompassHeading() && isFinite(fusedHeadingDeg)) {
-    lastHeadingDeg = fusedHeadingDeg;
-    _updateMyLocIconHeading();
-    scheduleApplyNavBearing();
-  }
-}
-
-
-
-// v5.42.4: Gyro integráció (devicemotion.rotationRate) + kompasz korrekció
-function _handleDeviceMotion(e){
-  try {
-    const rr = e && e.rotationRate;
-    if (!rr) return;
-    let yawRate = rr.alpha;
-    if (!(typeof yawRate === 'number' && isFinite(yawRate))) return;
-    yawRate = clamp(yawRate, -360, 360);
-
-    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    const dt = Math.min(0.05, Math.max(0.005, _motionLastTs ? (now - _motionLastTs) / 1000 : 0.02));
-    _motionLastTs = now;
-
-    if (!isFinite(gyroHeadingDeg)) {
-      gyroHeadingDeg = isFinite(compassHeadingDeg) ? compassHeadingDeg : 0;
-    } else {
-      gyroHeadingDeg = _normDeg(gyroHeadingDeg + yawRate * dt);
-    }
-
-    _gyroAvailable = true;
-
-    if (isFinite(compassHeadingDeg)) {
-      const delta = shortestAngleDelta(gyroHeadingDeg, compassHeadingDeg);
-      const corr = clamp(dt * 0.10, 0.0, 0.06);
-      gyroHeadingDeg = _normDeg(gyroHeadingDeg + delta * corr);
-    }
-
-    fusedHeadingDeg = gyroHeadingDeg;
-
-    if (_shouldUseCompassHeading() && isFinite(fusedHeadingDeg)) {
-      lastHeadingDeg = fusedHeadingDeg;
+    if (_smoothHeadingToward(fusedHeadingDeg, 'compass')) {
       _updateMyLocIconHeading();
       scheduleApplyNavBearing();
     }
-  } catch (_) {}
+  }
 }
 
+
+
+
+// v6.9: devicemotion/gyro integráció kikapcsolva.
+// Több telefonon zajos, előjelesen eltérő és felesleges forgásremegést okozott.
+function _handleDeviceMotion(_e){}
+
 function startMotionIfPossible(){
-  if (_motionInited) return;
-  if (!('DeviceMotionEvent' in window)) return;
-  _motionInited = true;
-  window.addEventListener('devicemotion', _handleDeviceMotion, true);
+  return;
 }
 async function requestCompassPermissionIfNeeded(){
   // Csak user-gesture-ből hívjuk (gombnyomás), különben iOS nem engedi.
@@ -1365,13 +1365,12 @@ function startMyLocationWatch() {
       const hCompass = (typeof compassHeadingDeg === "number" && isFinite(compassHeadingDeg)) ? _normDeg(compassHeadingDeg) : NaN;
 
       if (isFinite(hGeo)) {
-        lastHeadingDeg = hGeo;
+        _smoothHeadingToward(hGeo, 'geo');
         _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
       } else if (isFinite(hCompass)) {
-        // állva/forgás közben is működjön (gyro+kompasz fúzióval simábban)
+        // állva/forgás közben inkább a kisimított iránytűt használjuk
         const hFused = (typeof fusedHeadingDeg === 'number' && isFinite(fusedHeadingDeg)) ? _normDeg(fusedHeadingDeg) : hCompass;
-        lastHeadingDeg = hFused;
-        // _prevHeadingRaw-t csak bázisnak frissítjük
+        _smoothHeadingToward(hFused, 'compass');
         if (!_prevHeadingRaw) _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
       } else if (_prevHeadingRaw) {
         // fallback: két GPS pontból bearing
@@ -1383,11 +1382,7 @@ function startMyLocationWatch() {
 
         if (dHead >= minMoveForHeading && dtHead <= 8) {
           const rawBear = bearingDeg(_prevHeadingRaw.lat, _prevHeadingRaw.lng, latRaw, lngRaw);
-          if (!isFinite(lastHeadingDeg)) lastHeadingDeg = rawBear;
-          else {
-            const delta = shortestAngleDelta(lastHeadingDeg, rawBear);
-            if (Math.abs(delta) >= 8) lastHeadingDeg = _normDeg(lastHeadingDeg + delta * 0.35);
-          }
+          _smoothHeadingToward(rawBear, 'geo');
           _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
         } else if (dtHead > 8) {
           _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
@@ -1471,28 +1466,16 @@ function startMyLocationWatch() {
           lastMyLocCenterTs = nowTs;
           lastCenteredMyLocation = { lat: filteredMyLocation.lat, lng: filteredMyLocation.lng };
           
-// v5.41: nav mód "heading" esetén előrenézünk (a pozíció kicsit lejjebb marad a képernyőn).
-let targetLat = filteredMyLocation.lat;
-let targetLng = filteredMyLocation.lng;
-
-if (navMode === "heading" && isFinite(speed) && speed >= 0.8 && isFinite(lastHeadingDeg)) {
-  const z = map.getZoom();
-  const aheadM = (z >= 18) ? 55 : (z >= 17) ? 75 : (z >= 16) ? 95 : 125;
-  const o = offsetLatLng(filteredMyLocation.lat, filteredMyLocation.lng, lastHeadingDeg, aheadM);
-  targetLat = o[0]; targetLng = o[1];
-}
-
-	map.panTo([targetLat, targetLng], {
-            animate: true,
-            duration: GPS_CENTER_ANIM_S,
-            easeLinearity: 0.25,
-          });
-	// v5.42: heading módban tegyük a saját helyet "alsóbb" pozícióba (akkor is, ha épp nincs speed)
-	if (navMode === "heading") {
-	  try {
-	    map.panBy([0, navYOffsetPx()], { animate: true, duration: Math.min(0.45, GPS_CENTER_ANIM_S) });
-	  } catch (_) {}
-	}
+          try {
+            const easeOpts = {
+              center: [filteredMyLocation.lng, filteredMyLocation.lat],
+              duration: Math.round(GPS_CENTER_ANIM_S * 1000)
+            };
+            if (navMode === "heading") {
+              easeOpts.offset = [0, navYOffsetPx()];
+            }
+            map.easeTo(easeOpts);
+          } catch (_) {}
         }
       }
 
@@ -1796,7 +1779,9 @@ function buildMyLocationFeatureCollection(lat, lng, headingDeg, accM){
     properties: {
       kind: 'point',
       acc: (typeof accM === 'number' && isFinite(accM)) ? Number(accM) : null,
-      heading: (typeof headingDeg === 'number' && isFinite(headingDeg)) ? Number(_normDeg(headingDeg)) : null,
+      heading: (typeof headingDeg === 'number' && isFinite(headingDeg))
+        ? Number((navMode === 'heading') ? 0 : _normDeg(headingDeg))
+        : null,
       icon: 'cm-myloc-arrow'
     }
   });
@@ -1836,8 +1821,9 @@ async function ensureMyLocationLayer(){
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'icon-anchor': 'center',
-        // Map-alignment: heading-up modban (bearing=-heading) a nyil felfele fog nezni
-        'icon-rotation-alignment': 'map',
+        // Telefonon stabilabb, ha a nyíl viewporthoz igazodik.
+        // Észak felül módban a headinget mutatja, haladási irány módban pedig fixen felfelé néz.
+        'icon-rotation-alignment': 'viewport',
         'icon-rotate': ['coalesce', ['get', 'heading'], 0]
       },
       paint: {
@@ -2955,6 +2941,7 @@ if (navBtn) {
     } catch (_) {}
 
     // Forgatás/irány alkalmazása a kiválasztott navigáció mód szerint
+    try { _updateMyLocIconHeading(true); } catch (_) {}
     scheduleApplyNavBearing();
 
     // frissítsük az alsó "Középre" gomb láthatóságát is
@@ -4869,27 +4856,26 @@ function scheduleApplyNavBearing(){
     if (__cm_nav_bearing_raf) return;
     __cm_nav_bearing_raf = requestAnimationFrame(() => {
       __cm_nav_bearing_raf = null;
-      const target = (navMode === "heading" && isFinite(lastHeadingDeg)) ? _normDeg(-lastHeadingDeg) : 0;
 
-      const now = Date.now();
+      const moving = _isMovingForNav();
+      const target = (navMode === "heading" && isFinite(lastHeadingDeg)) ? _normDeg(-lastHeadingDeg) : 0;
       const cur = (typeof map.getBearing === 'function') ? map.getBearing() : 0;
       const curDelta = Math.abs(shortestAngleDelta(cur, target));
+      const now = Date.now();
 
-      // ha már gyakorlatilag ott van, ne animáljunk feleslegesen
-      if (curDelta < 0.25) return;
-
-      const last = (typeof __cm_nav_last_applied === 'number' && isFinite(__cm_nav_last_applied)) ? __cm_nav_last_applied : null;
-      const lastDelta = (last !== null) ? Math.abs(shortestAngleDelta(last, target)) : 999;
-
-      // kis változásokat throttlingoljuk (kompasz zaj ellen)
-      const minInterval = (navMode === 'heading') ? 120 : 200;
-      if ((now - __cm_nav_last_ts) < minInterval && lastDelta < 1.2) return;
+      const minDelta = (navMode === 'heading') ? (moving ? 4.0 : 12.0) : 0.8;
+      const minInterval = (navMode === 'heading') ? (moving ? 220 : 520) : 220;
+      if (curDelta < minDelta) return;
+      if ((now - __cm_nav_last_ts) < minInterval) return;
 
       __cm_nav_last_applied = target;
       __cm_nav_last_ts = now;
 
-      // rövid animáció, hogy ne legyen "ugrás"
-      map.easeTo({ bearing: target, duration: 180 });
+      try { if (typeof map.stop === 'function') map.stop(); } catch (_) {}
+      map.easeTo({
+        bearing: target,
+        duration: (navMode === 'heading') ? (moving ? 220 : 320) : 220
+      });
     });
   } catch (_) {}
 }
