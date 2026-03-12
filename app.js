@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7.6";
+const APP_VERSION = "6.7.7";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -1931,9 +1931,11 @@ function _pickNearestMarkerFeatureAtPoint(point){
 }
 
 function _pickMyLocationFeatureAtPoint(point){
+  // A saját hely popup csak a tényleges nyílra kattintva nyíljon meg.
+  // A korábbi hit-layer alapú logika túl nagy találati zónát adott,
+  // ezért sokszor üres térképkattintásra is a saját hely popup jött fel.
   const feats = [
-    ..._queryLayerFeaturesNearPoint(MYLOC_POINT_LAYER_ID, point, 8),
-    ..._queryLayerFeaturesNearPoint(MYLOC_HIT_LAYER_ID, point, 12)
+    ..._queryLayerFeaturesNearPoint(MYLOC_POINT_LAYER_ID, point, 6)
   ];
   if (!feats.length) return null;
 
@@ -1957,86 +1959,49 @@ function _pickMyLocationFeatureAtPoint(point){
     }
   }
 
-  return (best && bestD <= 34) ? best : null;
+  return (best && bestD <= 18) ? best : null;
 }
-
-let _skipEmptyMapClickUntil = 0;
 
 function installMapFeatureClickHandlerOnce(){
   if (!map || map.__cmFeatureClickInstalled) return;
   map.__cmFeatureClickInstalled = true;
 
-  map.on('click', MARKERS_HIT_LAYER_ID, async (e) => {
+  // Popup kezeléshez mindig a nyers MapLibre click eventet használjuk,
+  // mert annak biztosan van e.point mezője. Így egyetlen központi döntési
+  // pontból választjuk ki: marker / saját hely / üres térkép.
+  const onRaw = (typeof map.__rawOn === 'function') ? map.__rawOn.bind(map) : map.on.bind(map);
+
+  onRaw('click', async (e) => {
     try {
       if (moveModeMarkerId) return;
-      _skipEmptyMapClickUntil = Date.now() + 250;
-      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
-      try { closeMyLocationPopup(); } catch (_) {}
-
-      const pt = e && e.point ? e.point : null;
-      const feats = pt ? [
-        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
-        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
-      ] : (e && e.features ? e.features : []);
-      if (!feats || !feats.length) return;
-
-      let best = null;
-      let bestD = Infinity;
-      for (const f of feats) {
-        const id = f && f.properties ? Number(f.properties.id) : NaN;
-        if (!Number.isFinite(id)) continue;
-        const d = _projectDistanceToFeaturePoint(pt, f);
-        if (d < bestD) { bestD = d; best = f; }
-      }
-      if (!best) return;
-
-      const id = Number(best.properties.id);
-      const m = markersById.get(id) || await DB.getMarkerById(id);
-      if (!m || m.deletedAt) return;
-      markersById.set(id, m);
-      openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
-    } catch (err) {
-      console.warn('marker hit click failed', err);
-    }
-  });
-
-  map.on('click', MYLOC_HIT_LAYER_ID, (e) => {
-    try {
-      if (moveModeMarkerId || !lastMyLocation) return;
-      _skipEmptyMapClickUntil = Date.now() + 250;
-      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
-
-      const pt = e && e.point ? e.point : null;
-      const markerHere = pt ? [
-        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
-        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
-      ] : [];
-      if (markerHere && markerHere.length) return;
-
-      try { closeActiveMarkerPopup(); } catch (_) {}
-      openMyLocationPopup();
-    } catch (err) {
-      console.warn('my location hit click failed', err);
-    }
-  });
-
-  map.on('click', (e) => {
-    try {
-      if (moveModeMarkerId) return;
-      if (Date.now() < _skipEmptyMapClickUntil) return;
       const pt = e && e.point ? e.point : null;
       if (!pt) return;
 
-      const markerHere = _pickNearestMarkerFeatureAtPoint(pt);
-      if (markerHere) return;
+      const markerHit = _pickNearestMarkerFeatureAtPoint(pt);
+      if (markerHit) {
+        try { closeMyLocationPopup(); } catch (_) {}
 
-      const myLocHere = _pickMyLocationFeatureAtPoint(pt);
-      if (myLocHere && lastMyLocation) return;
+        const id = markerHit && markerHit.properties ? Number(markerHit.properties.id) : NaN;
+        if (!Number.isFinite(id)) return;
+
+        const m = markersById.get(id) || await DB.getMarkerById(id);
+        if (!m || m.deletedAt) return;
+        markersById.set(id, m);
+        openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
+        return;
+      }
+
+      const myLocHit = lastMyLocation ? _pickMyLocationFeatureAtPoint(pt) : null;
+      if (myLocHit) {
+        try { closeActiveMarkerPopup(); } catch (_) {}
+        openMyLocationPopup();
+        return;
+      }
 
       try { closeActiveMarkerPopup(); } catch (_) {}
       try { closeMyLocationPopup(); } catch (_) {}
     } catch (err) {
-      console.warn('empty map click handler failed', err);
+      console.warn('feature click handler failed', err);
     }
   });
 }
