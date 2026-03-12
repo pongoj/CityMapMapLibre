@@ -1,4 +1,4 @@
-const APP_VERSION = "6.7.7";
+const APP_VERSION = "6.8";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -333,32 +333,51 @@ function _drawPinCanvas(fillColor){
   ctx.clearRect(0, 0, size, size);
 
   const cx = size / 2;
-  const cy = size * 0.30;
-  const r = size * 0.21;
-  const tipY = size * 0.90;
+  const cy = size * 0.31;
+  const topR = size * 0.20;
+  const tipY = size * 0.86;
+  const sideX = size * 0.26;
+  const shoulderY = size * 0.50;
 
-  // shadow
+  // soft shadow
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(cx, size * 0.92, size * 0.16, size * 0.03, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.14)';
+  ctx.ellipse(cx, size * 0.90, size * 0.13, size * 0.024, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.fill();
   ctx.restore();
 
-  // body - closer to the sample image
+  // clean teardrop / pin body, closer to the reference image
   ctx.beginPath();
   ctx.moveTo(cx, tipY);
-  ctx.bezierCurveTo(cx - size * 0.12, size * 0.70, cx - size * 0.27, size * 0.54, cx - size * 0.27, cy);
-  ctx.arc(cx, cy, r, Math.PI, 0, false);
-  ctx.bezierCurveTo(cx + size * 0.27, size * 0.54, cx + size * 0.12, size * 0.70, cx, tipY);
+  ctx.bezierCurveTo(
+    cx - size * 0.10, size * 0.72,
+    cx - sideX, shoulderY,
+    cx - sideX, cy
+  );
+  ctx.bezierCurveTo(
+    cx - sideX, size * 0.14,
+    cx - size * 0.10, size * 0.08,
+    cx, size * 0.08
+  );
+  ctx.bezierCurveTo(
+    cx + size * 0.10, size * 0.08,
+    cx + sideX, size * 0.14,
+    cx + sideX, cy
+  );
+  ctx.bezierCurveTo(
+    cx + sideX, shoulderY,
+    cx + size * 0.10, size * 0.72,
+    cx, tipY
+  );
   ctx.closePath();
-  ctx.fillStyle = String(fillColor || '#e53935');
+  ctx.fillStyle = String(fillColor || '#d90429');
   ctx.fill();
 
-  // inner hole
+  // inner white hole
   ctx.beginPath();
-  ctx.arc(cx, cy, size * 0.12, 0, Math.PI * 2);
-  ctx.fillStyle = '#f2f2f2';
+  ctx.arc(cx, size * 0.28, topR * 0.72, 0, Math.PI * 2);
+  ctx.fillStyle = '#f5f5f5';
   ctx.fill();
 
   return c;
@@ -1610,23 +1629,24 @@ function idText(id) {
 
 function popupHtml(m) {
   const isDeleted = !!m.deletedAt;
+  const btnBase = 'width:100%;min-height:40px;padding:10px 12px;border:1px solid #cfd5df;border-radius:10px;background:#ffffff;color:#1f2937;font-size:14px;font-weight:600;box-sizing:border-box;';
+  const btnPrimary = btnBase + 'box-shadow:0 1px 2px rgba(15,23,42,0.08);';
+  const btnDanger = btnBase + 'border-color:#fecaca;background:#fff5f5;color:#b91c1c;box-shadow:0 1px 2px rgba(127,29,29,0.06);';
+  const btnDisabled = btnBase + 'opacity:0.55;cursor:not-allowed;background:#f8fafc;color:#64748b;box-shadow:none;';
   return `
-  <div class="cm-popup" style="min-width:240px">
+  <div class="cm-popup" style="min-width:276px;max-width:300px;line-height:1.45">
     <div><b>Azonosítószám:</b> ${idText(m.id)}</div>
     <div><b>Cím:</b> ${escapeHtml(m.address)}</div>
     <div><b>Típus:</b> ${escapeHtml(m.typeLabel)}</div>
     <div><b>Állapot:</b> ${escapeHtml(m.statusLabel)}</div>
     <div><b>Megjegyzés:</b> ${m.notes ? escapeHtml(m.notes) : "-"}</div>
+    ${isDeleted ? '<div style="margin-top:8px;color:#b91c1c;font-weight:700;">TÖRÖLT</div>' : ''}
 
-    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button class="btnPhotos" data-uuid="${m.uuid}" data-title="${idText(m.id)}">Fotók (<span id="pc-${m.uuid}">…</span>)</button>
-      ${isDeleted ? '<span style="color:#b91c1c;font-weight:700;">TÖRÖLT</span>' : ''}
-    </div>
-
-    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-      <button data-edit="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem módosítható"' : ''}>Módosítás</button>
-      <button data-move="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem mozgatható"' : ''}>Mozgatás</button>
-      <button data-del="${m.id}">Törlés</button>
+    <div style="margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:stretch;">
+      <button class="btnPhotos" data-uuid="${m.uuid}" data-title="${idText(m.id)}" style="${btnPrimary}">Fotók (<span id="pc-${m.uuid}">…</span>)</button>
+      <button data-del="${m.id}" style="${btnDanger}">Törlés</button>
+      <button data-edit="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem módosítható"' : ''} style="${isDeleted ? btnDisabled : btnPrimary}">Módosítás</button>
+      <button data-move="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem mozgatható"' : ''} style="${isDeleted ? btnDisabled : btnPrimary}">Mozgatás</button>
     </div>
   </div>`;
 }
