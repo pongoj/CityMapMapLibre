@@ -1,4 +1,4 @@
-const APP_VERSION = "6.8";
+const APP_VERSION = "6.8.1";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -1629,12 +1629,12 @@ function idText(id) {
 
 function popupHtml(m) {
   const isDeleted = !!m.deletedAt;
-  const btnBase = 'width:100%;min-height:40px;padding:10px 12px;border:1px solid #cfd5df;border-radius:10px;background:#ffffff;color:#1f2937;font-size:14px;font-weight:600;box-sizing:border-box;';
-  const btnPrimary = btnBase + 'box-shadow:0 1px 2px rgba(15,23,42,0.08);';
-  const btnDanger = btnBase + 'border-color:#fecaca;background:#fff5f5;color:#b91c1c;box-shadow:0 1px 2px rgba(127,29,29,0.06);';
+  const btnBase = 'width:100%;min-height:34px;padding:7px 10px;border:1px solid #cfd5df;border-radius:8px;background:#ffffff;color:#1f2937;font-size:12px;font-weight:600;line-height:1.2;box-sizing:border-box;';
+  const btnPrimary = btnBase + 'box-shadow:0 1px 2px rgba(15,23,42,0.06);';
+  const btnDanger = btnBase + 'border-color:#fecaca;background:#fff7f7;color:#b91c1c;box-shadow:0 1px 2px rgba(127,29,29,0.05);';
   const btnDisabled = btnBase + 'opacity:0.55;cursor:not-allowed;background:#f8fafc;color:#64748b;box-shadow:none;';
   return `
-  <div class="cm-popup" style="min-width:276px;max-width:300px;line-height:1.45">
+  <div class="cm-popup" style="min-width:236px;max-width:252px;line-height:1.38">
     <div><b>Azonosítószám:</b> ${idText(m.id)}</div>
     <div><b>Cím:</b> ${escapeHtml(m.address)}</div>
     <div><b>Típus:</b> ${escapeHtml(m.typeLabel)}</div>
@@ -1642,7 +1642,7 @@ function popupHtml(m) {
     <div><b>Megjegyzés:</b> ${m.notes ? escapeHtml(m.notes) : "-"}</div>
     ${isDeleted ? '<div style="margin-top:8px;color:#b91c1c;font-weight:700;">TÖRÖLT</div>' : ''}
 
-    <div style="margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:stretch;">
+    <div style="margin-top:10px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-items:stretch;">
       <button class="btnPhotos" data-uuid="${m.uuid}" data-title="${idText(m.id)}" style="${btnPrimary}">Fotók (<span id="pc-${m.uuid}">…</span>)</button>
       <button data-del="${m.id}" style="${btnDanger}">Törlés</button>
       <button data-edit="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem módosítható"' : ''} style="${isDeleted ? btnDisabled : btnPrimary}">Módosítás</button>
