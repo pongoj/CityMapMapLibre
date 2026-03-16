@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10";
+const APP_VERSION = "6.10.1";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -2715,37 +2715,69 @@ document.addEventListener("DOMContentLoaded", async () => {
           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.0, 16, 2.8],
           "line-dasharray": [2, 1]
         } },
+      { id: "road-service-case", type: "line", source: "basemap", "source-layer": "transportation",
+        filter: ["==", ["get", "class"], "service"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#d9d1c8",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.8, 16, 5.4],
+          "line-opacity": 0.95
+        } },
       { id: "road-service", type: "line", source: "basemap", "source-layer": "transportation",
         filter: ["==", ["get", "class"], "service"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#ffffff",
+          "line-color": "#fffdfa",
           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4.6],
+          "line-opacity": 0.98
+        } },
+      { id: "road-minor-case", type: "line", source: "basemap", "source-layer": "transportation",
+        filter: ["==", ["get", "class"], "minor"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#d5ccc2",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 2.2, 16, 6.8],
           "line-opacity": 0.96
         } },
       { id: "road-minor", type: "line", source: "basemap", "source-layer": "transportation",
         filter: ["==", ["get", "class"], "minor"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#ffffff",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1.4, 16, 5.4],
+          "line-color": "#fffefc",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1.6, 16, 5.8],
+          "line-opacity": 0.99
+        } },
+      { id: "road-main-case", type: "line", source: "basemap", "source-layer": "transportation",
+        filter: ["match", ["get", "class"], ["primary", "secondary", "tertiary", "trunk"], true, false],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#d5a55a",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.8, 16, 8.8],
           "line-opacity": 0.98
         } },
       { id: "road-main", type: "line", source: "basemap", "source-layer": "transportation",
         filter: ["match", ["get", "class"], ["primary", "secondary", "tertiary", "trunk"], true, false],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#f7d59c",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.8, 16, 6.6],
-          "line-opacity": 0.98
+          "line-color": "#f7d18d",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.2, 16, 7.6],
+          "line-opacity": 0.99
+        } },
+      { id: "road-motor-case", type: "line", source: "basemap", "source-layer": "transportation",
+        filter: ["match", ["get", "class"], ["motorway"], true, false],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#cb8542",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 3.2, 16, 9.6],
+          "line-opacity": 0.99
         } },
       { id: "road-motor", type: "line", source: "basemap", "source-layer": "transportation",
         filter: ["match", ["get", "class"], ["motorway"], true, false],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#f4bb7a",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 2.0, 16, 7.2],
-          "line-opacity": 0.98
+          "line-color": "#f4b66d",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 2.4, 16, 8.2],
+          "line-opacity": 0.99
         } },
       { id: "road-rail", type: "line", source: "basemap", "source-layer": "transportation",
         filter: ["==", ["get", "class"], "rail"],
