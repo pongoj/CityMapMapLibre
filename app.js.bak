@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10";
+const APP_VERSION = "6.7.4";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -333,51 +333,32 @@ function _drawPinCanvas(fillColor){
   ctx.clearRect(0, 0, size, size);
 
   const cx = size / 2;
-  const cy = size * 0.31;
-  const topR = size * 0.20;
-  const tipY = size * 0.86;
-  const sideX = size * 0.26;
-  const shoulderY = size * 0.50;
+  const cy = size * 0.30;
+  const r = size * 0.21;
+  const tipY = size * 0.90;
 
-  // soft shadow
+  // shadow
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(cx, size * 0.90, size * 0.13, size * 0.024, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.ellipse(cx, size * 0.92, size * 0.16, size * 0.03, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
   ctx.fill();
   ctx.restore();
 
-  // clean teardrop / pin body, closer to the reference image
+  // body - closer to the sample image
   ctx.beginPath();
   ctx.moveTo(cx, tipY);
-  ctx.bezierCurveTo(
-    cx - size * 0.10, size * 0.72,
-    cx - sideX, shoulderY,
-    cx - sideX, cy
-  );
-  ctx.bezierCurveTo(
-    cx - sideX, size * 0.14,
-    cx - size * 0.10, size * 0.08,
-    cx, size * 0.08
-  );
-  ctx.bezierCurveTo(
-    cx + size * 0.10, size * 0.08,
-    cx + sideX, size * 0.14,
-    cx + sideX, cy
-  );
-  ctx.bezierCurveTo(
-    cx + sideX, shoulderY,
-    cx + size * 0.10, size * 0.72,
-    cx, tipY
-  );
+  ctx.bezierCurveTo(cx - size * 0.12, size * 0.70, cx - size * 0.27, size * 0.54, cx - size * 0.27, cy);
+  ctx.arc(cx, cy, r, Math.PI, 0, false);
+  ctx.bezierCurveTo(cx + size * 0.27, size * 0.54, cx + size * 0.12, size * 0.70, cx, tipY);
   ctx.closePath();
-  ctx.fillStyle = String(fillColor || '#d90429');
+  ctx.fillStyle = String(fillColor || '#e53935');
   ctx.fill();
 
-  // inner white hole
+  // inner hole
   ctx.beginPath();
-  ctx.arc(cx, size * 0.28, topR * 0.72, 0, Math.PI * 2);
-  ctx.fillStyle = '#f5f5f5';
+  ctx.arc(cx, cy, size * 0.12, 0, Math.PI * 2);
+  ctx.fillStyle = '#f2f2f2';
   ctx.fill();
 
   return c;
@@ -871,17 +852,8 @@ const GPS_DEADZONE_MIN_M = 4;       // ennyi alatt (állva) ne mozduljon
 const GPS_DEADZONE_MAX_M = 10;      // deadzone felső korlát
 const GPS_JUMP_REJECT_M = 120;      // irreális ugrás eldobása (ha túl gyors)
 const GPS_MARKER_ANIM_MS = 650;     // marker animáció időtartam
-const GPS_CENTER_ANIM_S = 0.42;     // térkép pan animáció
-const GPS_MIN_CENTER_INTERVAL_MS = 900;
-
-// MapLibre telefonos nav stabilizálás:
-// - mozgás közben inkább GPS/course heading
-// - állva inkább iránytű, de nagyobb hiszterézissel
-// - a saját hely nyíl viewport-aligned, heading módban fixen felfelé mutat
-const NAV_MOVE_SPEED_MPS = 1.6;
-const NAV_MOVE_SPEED_STALE_MS = 4000;
-const NAV_COMPASS_STATIONARY_DEADBAND_DEG = 10;
-const NAV_COMPASS_MOVING_DEADBAND_DEG = 4;
+const GPS_CENTER_ANIM_S = 0.55;     // térkép pan animáció
+const GPS_MIN_CENTER_INTERVAL_MS = 650;
 
 let myLocFollowEnabled = true;
 // v5.41: Navigáció mód (térkép követés viselkedése)
@@ -1031,45 +1003,11 @@ let _motionInited = false;
 let lastSpeedMps = NaN;
 let lastSpeedTs = 0;
 
-function _recentSpeedMps(){
+function _shouldUseCompassHeading(){
   try {
     const now = Date.now();
-    if (isFinite(lastSpeedMps) && (now - lastSpeedTs) < NAV_MOVE_SPEED_STALE_MS) return Number(lastSpeedMps);
+    if (isFinite(lastSpeedMps) && lastSpeedMps >= 1.2 && (now - lastSpeedTs) < 5000) return false;
   } catch (_) {}
-  return NaN;
-}
-
-function _isMovingForNav(){
-  const s = _recentSpeedMps();
-  return isFinite(s) && s >= NAV_MOVE_SPEED_MPS;
-}
-
-function _shouldUseCompassHeading(){
-  return !_isMovingForNav();
-}
-
-function _smoothHeadingToward(targetDeg, sourceKind){
-  if (!(typeof targetDeg === "number" && isFinite(targetDeg))) return false;
-  const target = _normDeg(targetDeg);
-  if (!(typeof lastHeadingDeg === "number" && isFinite(lastHeadingDeg))) {
-    lastHeadingDeg = target;
-    return true;
-  }
-
-  const moving = _isMovingForNav();
-  const delta = shortestAngleDelta(lastHeadingDeg, target);
-  const absd = Math.abs(delta);
-  const dead = moving ? NAV_COMPASS_MOVING_DEADBAND_DEG : NAV_COMPASS_STATIONARY_DEADBAND_DEG;
-  if (absd < dead) return false;
-
-  let alpha;
-  if (sourceKind === 'geo') {
-    alpha = moving ? (absd > 35 ? 0.45 : absd > 15 ? 0.30 : 0.20) : (absd > 35 ? 0.28 : 0.16);
-  } else {
-    alpha = moving ? (absd > 35 ? 0.30 : absd > 15 ? 0.18 : 0.12) : (absd > 35 ? 0.18 : absd > 15 ? 0.12 : 0.08);
-  }
-
-  lastHeadingDeg = _normDeg(lastHeadingDeg + delta * alpha);
   return true;
 }
 
@@ -1091,11 +1029,11 @@ function _getScreenAngle(){
   return 0;
 }
 
-function _updateMyLocIconHeading(force = false){
+function _updateMyLocIconHeading(){
   // v6.3: Saját hely DOM marker helyett GeoJSON layer – heading frissítés
   if (!map || !lastMyLocation) return;
   try {
-    setMyLocationGeoData(lastMyLocation.lat, lastMyLocation.lng, lastHeadingDeg, lastMyLocationAccM, { force: !!force, headingOnly: !force });
+    setMyLocationGeoData(lastMyLocation.lat, lastMyLocation.lng, lastHeadingDeg, lastMyLocationAccM, { force: false, headingOnly: true });
   } catch (_) {}
 }
 
@@ -1167,28 +1105,71 @@ function _handleDeviceOrientation(e){
       }
     }
   }
-  // Telefonon a giroszkóp integráció több készüléken zajos / előjelesen hibás.
-  // Ezért a tényleges nav headinghez itt a kisimított iránytűt használjuk,
-  // mozgás közben pedig a watchPosition GPS/course heading veheti át a szerepet.
-  fusedHeadingDeg = compassHeadingDeg;
+
+  // v5.42.4: ha van giroszkóp, a forgást az integrált yaw adja (sokkal simább),
+  // a kompasz csak lassan korrigál (drift ellen). Ha nincs gyro, marad a kompasz.
+  if (!_gyroAvailable || !isFinite(gyroHeadingDeg)) {
+    fusedHeadingDeg = compassHeadingDeg;
+  } else if (isFinite(compassHeadingDeg)) {
+    // apró korrekció itt is, ha a devicemotion ritka
+    const d = shortestAngleDelta(gyroHeadingDeg, compassHeadingDeg);
+    gyroHeadingDeg = _normDeg(gyroHeadingDeg + d * 0.02);
+    fusedHeadingDeg = gyroHeadingDeg;
+  } else {
+    fusedHeadingDeg = gyroHeadingDeg;
+  }
 
   if (_shouldUseCompassHeading() && isFinite(fusedHeadingDeg)) {
-    if (_smoothHeadingToward(fusedHeadingDeg, 'compass')) {
-      _updateMyLocIconHeading();
-      scheduleApplyNavBearing();
-    }
+    lastHeadingDeg = fusedHeadingDeg;
+    _updateMyLocIconHeading();
+    scheduleApplyNavBearing();
   }
 }
 
 
 
+// v5.42.4: Gyro integráció (devicemotion.rotationRate) + kompasz korrekció
+function _handleDeviceMotion(e){
+  try {
+    const rr = e && e.rotationRate;
+    if (!rr) return;
+    let yawRate = rr.alpha;
+    if (!(typeof yawRate === 'number' && isFinite(yawRate))) return;
+    yawRate = clamp(yawRate, -360, 360);
 
-// v6.9: devicemotion/gyro integráció kikapcsolva.
-// Több telefonon zajos, előjelesen eltérő és felesleges forgásremegést okozott.
-function _handleDeviceMotion(_e){}
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const dt = Math.min(0.05, Math.max(0.005, _motionLastTs ? (now - _motionLastTs) / 1000 : 0.02));
+    _motionLastTs = now;
+
+    if (!isFinite(gyroHeadingDeg)) {
+      gyroHeadingDeg = isFinite(compassHeadingDeg) ? compassHeadingDeg : 0;
+    } else {
+      gyroHeadingDeg = _normDeg(gyroHeadingDeg + yawRate * dt);
+    }
+
+    _gyroAvailable = true;
+
+    if (isFinite(compassHeadingDeg)) {
+      const delta = shortestAngleDelta(gyroHeadingDeg, compassHeadingDeg);
+      const corr = clamp(dt * 0.10, 0.0, 0.06);
+      gyroHeadingDeg = _normDeg(gyroHeadingDeg + delta * corr);
+    }
+
+    fusedHeadingDeg = gyroHeadingDeg;
+
+    if (_shouldUseCompassHeading() && isFinite(fusedHeadingDeg)) {
+      lastHeadingDeg = fusedHeadingDeg;
+      _updateMyLocIconHeading();
+      scheduleApplyNavBearing();
+    }
+  } catch (_) {}
+}
 
 function startMotionIfPossible(){
-  return;
+  if (_motionInited) return;
+  if (!('DeviceMotionEvent' in window)) return;
+  _motionInited = true;
+  window.addEventListener('devicemotion', _handleDeviceMotion, true);
 }
 async function requestCompassPermissionIfNeeded(){
   // Csak user-gesture-ből hívjuk (gombnyomás), különben iOS nem engedi.
@@ -1365,12 +1346,13 @@ function startMyLocationWatch() {
       const hCompass = (typeof compassHeadingDeg === "number" && isFinite(compassHeadingDeg)) ? _normDeg(compassHeadingDeg) : NaN;
 
       if (isFinite(hGeo)) {
-        _smoothHeadingToward(hGeo, 'geo');
+        lastHeadingDeg = hGeo;
         _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
       } else if (isFinite(hCompass)) {
-        // állva/forgás közben inkább a kisimított iránytűt használjuk
+        // állva/forgás közben is működjön (gyro+kompasz fúzióval simábban)
         const hFused = (typeof fusedHeadingDeg === 'number' && isFinite(fusedHeadingDeg)) ? _normDeg(fusedHeadingDeg) : hCompass;
-        _smoothHeadingToward(hFused, 'compass');
+        lastHeadingDeg = hFused;
+        // _prevHeadingRaw-t csak bázisnak frissítjük
         if (!_prevHeadingRaw) _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
       } else if (_prevHeadingRaw) {
         // fallback: két GPS pontból bearing
@@ -1382,7 +1364,11 @@ function startMyLocationWatch() {
 
         if (dHead >= minMoveForHeading && dtHead <= 8) {
           const rawBear = bearingDeg(_prevHeadingRaw.lat, _prevHeadingRaw.lng, latRaw, lngRaw);
-          _smoothHeadingToward(rawBear, 'geo');
+          if (!isFinite(lastHeadingDeg)) lastHeadingDeg = rawBear;
+          else {
+            const delta = shortestAngleDelta(lastHeadingDeg, rawBear);
+            if (Math.abs(delta) >= 8) lastHeadingDeg = _normDeg(lastHeadingDeg + delta * 0.35);
+          }
           _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
         } else if (dtHead > 8) {
           _prevHeadingRaw = { lat: latRaw, lng: lngRaw, ts: nowTs };
@@ -1466,16 +1452,28 @@ function startMyLocationWatch() {
           lastMyLocCenterTs = nowTs;
           lastCenteredMyLocation = { lat: filteredMyLocation.lat, lng: filteredMyLocation.lng };
           
-          try {
-            const easeOpts = {
-              center: [filteredMyLocation.lng, filteredMyLocation.lat],
-              duration: Math.round(GPS_CENTER_ANIM_S * 1000)
-            };
-            if (navMode === "heading") {
-              easeOpts.offset = [0, navYOffsetPx()];
-            }
-            map.easeTo(easeOpts);
-          } catch (_) {}
+// v5.41: nav mód "heading" esetén előrenézünk (a pozíció kicsit lejjebb marad a képernyőn).
+let targetLat = filteredMyLocation.lat;
+let targetLng = filteredMyLocation.lng;
+
+if (navMode === "heading" && isFinite(speed) && speed >= 0.8 && isFinite(lastHeadingDeg)) {
+  const z = map.getZoom();
+  const aheadM = (z >= 18) ? 55 : (z >= 17) ? 75 : (z >= 16) ? 95 : 125;
+  const o = offsetLatLng(filteredMyLocation.lat, filteredMyLocation.lng, lastHeadingDeg, aheadM);
+  targetLat = o[0]; targetLng = o[1];
+}
+
+	map.panTo([targetLat, targetLng], {
+            animate: true,
+            duration: GPS_CENTER_ANIM_S,
+            easeLinearity: 0.25,
+          });
+	// v5.42: heading módban tegyük a saját helyet "alsóbb" pozícióba (akkor is, ha épp nincs speed)
+	if (navMode === "heading") {
+	  try {
+	    map.panBy([0, navYOffsetPx()], { animate: true, duration: Math.min(0.45, GPS_CENTER_ANIM_S) });
+	  } catch (_) {}
+	}
         }
       }
 
@@ -1612,24 +1610,23 @@ function idText(id) {
 
 function popupHtml(m) {
   const isDeleted = !!m.deletedAt;
-  const btnBase = 'width:100%;min-height:24px;padding:4px 8px;border:1px solid #cfd5df;border-radius:7px;background:#ffffff;color:#1f2937;font-size:10.5px;font-weight:600;line-height:1.15;box-sizing:border-box;';
-  const btnPrimary = btnBase + 'box-shadow:0 1px 2px rgba(15,23,42,0.05);';
-  const btnDanger = btnBase + 'border-color:#fecaca;background:#fff7f7;color:#b91c1c;box-shadow:0 1px 2px rgba(127,29,29,0.04);';
-  const btnDisabled = btnBase + 'opacity:0.55;cursor:not-allowed;background:#f8fafc;color:#64748b;box-shadow:none;';
   return `
-  <div class="cm-popup" style="min-width:188px;max-width:198px;line-height:1.34;font-size:12px;">
+  <div class="cm-popup" style="min-width:240px">
     <div><b>Azonosítószám:</b> ${idText(m.id)}</div>
     <div><b>Cím:</b> ${escapeHtml(m.address)}</div>
     <div><b>Típus:</b> ${escapeHtml(m.typeLabel)}</div>
     <div><b>Állapot:</b> ${escapeHtml(m.statusLabel)}</div>
     <div><b>Megjegyzés:</b> ${m.notes ? escapeHtml(m.notes) : "-"}</div>
-    ${isDeleted ? '<div style="margin-top:8px;color:#b91c1c;font-weight:700;">TÖRÖLT</div>' : ''}
 
-    <div style="margin-top:8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;align-items:stretch;">
-      <button class="btnPhotos" data-uuid="${m.uuid}" data-title="${idText(m.id)}" style="${btnPrimary}">Fotók (<span id="pc-${m.uuid}">…</span>)</button>
-      <button data-del="${m.id}" style="${btnDanger}">Törlés</button>
-      <button data-edit="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem módosítható"' : ''} style="${isDeleted ? btnDisabled : btnPrimary}">Módosítás</button>
-      <button data-move="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem mozgatható"' : ''} style="${isDeleted ? btnDisabled : btnPrimary}">Mozgatás</button>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btnPhotos" data-uuid="${m.uuid}" data-title="${idText(m.id)}">Fotók (<span id="pc-${m.uuid}">…</span>)</button>
+      ${isDeleted ? '<span style="color:#b91c1c;font-weight:700;">TÖRÖLT</span>' : ''}
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+      <button data-edit="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem módosítható"' : ''}>Módosítás</button>
+      <button data-move="${m.id}" ${isDeleted ? 'disabled title="A törölt objektum nem mozgatható"' : ''}>Mozgatás</button>
+      <button data-del="${m.id}">Törlés</button>
     </div>
   </div>`;
 }
@@ -1779,9 +1776,7 @@ function buildMyLocationFeatureCollection(lat, lng, headingDeg, accM){
     properties: {
       kind: 'point',
       acc: (typeof accM === 'number' && isFinite(accM)) ? Number(accM) : null,
-      heading: (typeof headingDeg === 'number' && isFinite(headingDeg))
-        ? Number((navMode === 'heading') ? 0 : _normDeg(headingDeg))
-        : null,
+      heading: (typeof headingDeg === 'number' && isFinite(headingDeg)) ? Number(_normDeg(headingDeg)) : null,
       icon: 'cm-myloc-arrow'
     }
   });
@@ -1804,11 +1799,9 @@ async function ensureMyLocationLayer(){
     // Saját hely nyíl ikon (canvas)
     _ensureMyLocArrowImage();
 
-    // A saját hely rétegek legyenek a markerek *és a marker hit layer* alatt,
-    // hogy marker kattintásnál biztosan ne a saját hely "hit" réteg kapja el az eseményt.
-    const _beforeMarkers = (map.getLayer && map.getLayer(MARKERS_HIT_LAYER_ID))
-      ? MARKERS_HIT_LAYER_ID
-      : ((map.getLayer && map.getLayer(MARKERS_LAYER_ID)) ? MARKERS_LAYER_ID : undefined);
+    // A saját hely rétegek legyenek a markerek alatt, hogy marker kattintásnál
+    // ne a saját hely "hit" réteg kapja el az eseményt.
+    const _beforeMarkers = (map.getLayer && map.getLayer(MARKERS_LAYER_ID)) ? MARKERS_LAYER_ID : undefined;
 
     map.addLayer({
       id: MYLOC_POINT_LAYER_ID,
@@ -1821,9 +1814,8 @@ async function ensureMyLocationLayer(){
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'icon-anchor': 'center',
-        // Telefonon stabilabb, ha a nyíl viewporthoz igazodik.
-        // Észak felül módban a headinget mutatja, haladási irány módban pedig fixen felfelé néz.
-        'icon-rotation-alignment': 'viewport',
+        // Map-alignment: heading-up modban (bearing=-heading) a nyil felfele fog nezni
+        'icon-rotation-alignment': 'map',
         'icon-rotate': ['coalesce', ['get', 'heading'], 0]
       },
       paint: {
@@ -1937,11 +1929,9 @@ function _pickNearestMarkerFeatureAtPoint(point){
 }
 
 function _pickMyLocationFeatureAtPoint(point){
-  // A saját hely popup csak a tényleges nyílra kattintva nyíljon meg.
-  // A korábbi hit-layer alapú logika túl nagy találati zónát adott,
-  // ezért sokszor üres térképkattintásra is a saját hely popup jött fel.
   const feats = [
-    ..._queryLayerFeaturesNearPoint(MYLOC_POINT_LAYER_ID, point, 6)
+    ..._queryLayerFeaturesNearPoint(MYLOC_POINT_LAYER_ID, point, 8),
+    ..._queryLayerFeaturesNearPoint(MYLOC_HIT_LAYER_ID, point, 12)
   ];
   if (!feats.length) return null;
 
@@ -1965,49 +1955,86 @@ function _pickMyLocationFeatureAtPoint(point){
     }
   }
 
-  return (best && bestD <= 18) ? best : null;
+  return (best && bestD <= 34) ? best : null;
 }
+
+let _skipEmptyMapClickUntil = 0;
 
 function installMapFeatureClickHandlerOnce(){
   if (!map || map.__cmFeatureClickInstalled) return;
   map.__cmFeatureClickInstalled = true;
 
-  // Popup kezeléshez mindig a nyers MapLibre click eventet használjuk,
-  // mert annak biztosan van e.point mezője. Így egyetlen központi döntési
-  // pontból választjuk ki: marker / saját hely / üres térkép.
-  const onRaw = (typeof map.__rawOn === 'function') ? map.__rawOn.bind(map) : map.on.bind(map);
-
-  onRaw('click', async (e) => {
+  map.on('click', MARKERS_HIT_LAYER_ID, async (e) => {
     try {
       if (moveModeMarkerId) return;
+      _skipEmptyMapClickUntil = Date.now() + 250;
+      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
+      try { closeMyLocationPopup(); } catch (_) {}
+
+      const pt = e && e.point ? e.point : null;
+      const feats = pt ? [
+        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
+        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
+      ] : (e && e.features ? e.features : []);
+      if (!feats || !feats.length) return;
+
+      let best = null;
+      let bestD = Infinity;
+      for (const f of feats) {
+        const id = f && f.properties ? Number(f.properties.id) : NaN;
+        if (!Number.isFinite(id)) continue;
+        const d = _projectDistanceToFeaturePoint(pt, f);
+        if (d < bestD) { bestD = d; best = f; }
+      }
+      if (!best) return;
+
+      const id = Number(best.properties.id);
+      const m = markersById.get(id) || await DB.getMarkerById(id);
+      if (!m || m.deletedAt) return;
+      markersById.set(id, m);
+      openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
+    } catch (err) {
+      console.warn('marker hit click failed', err);
+    }
+  });
+
+  map.on('click', MYLOC_HIT_LAYER_ID, (e) => {
+    try {
+      if (moveModeMarkerId || !lastMyLocation) return;
+      _skipEmptyMapClickUntil = Date.now() + 250;
+      try { e && e.preventDefault && e.preventDefault(); } catch (_) {}
+
+      const pt = e && e.point ? e.point : null;
+      const markerHere = pt ? [
+        ..._queryLayerFeaturesNearPoint(MARKERS_LAYER_ID, pt, 6),
+        ..._queryLayerFeaturesNearPoint(MARKERS_HIT_LAYER_ID, pt, 12)
+      ] : [];
+      if (markerHere && markerHere.length) return;
+
+      try { closeActiveMarkerPopup(); } catch (_) {}
+      openMyLocationPopup();
+    } catch (err) {
+      console.warn('my location hit click failed', err);
+    }
+  });
+
+  map.on('click', (e) => {
+    try {
+      if (moveModeMarkerId) return;
+      if (Date.now() < _skipEmptyMapClickUntil) return;
       const pt = e && e.point ? e.point : null;
       if (!pt) return;
 
-      const markerHit = _pickNearestMarkerFeatureAtPoint(pt);
-      if (markerHit) {
-        try { closeMyLocationPopup(); } catch (_) {}
+      const markerHere = _pickNearestMarkerFeatureAtPoint(pt);
+      if (markerHere) return;
 
-        const id = markerHit && markerHit.properties ? Number(markerHit.properties.id) : NaN;
-        if (!Number.isFinite(id)) return;
-
-        const m = markersById.get(id) || await DB.getMarkerById(id);
-        if (!m || m.deletedAt) return;
-        markersById.set(id, m);
-        openMarkerPopup(m, { lng: Number(m.lng), lat: Number(m.lat) });
-        return;
-      }
-
-      const myLocHit = lastMyLocation ? _pickMyLocationFeatureAtPoint(pt) : null;
-      if (myLocHit) {
-        try { closeActiveMarkerPopup(); } catch (_) {}
-        openMyLocationPopup();
-        return;
-      }
+      const myLocHere = _pickMyLocationFeatureAtPoint(pt);
+      if (myLocHere && lastMyLocation) return;
 
       try { closeActiveMarkerPopup(); } catch (_) {}
       try { closeMyLocationPopup(); } catch (_) {}
     } catch (err) {
-      console.warn('feature click handler failed', err);
+      console.warn('empty map click handler failed', err);
     }
   });
 }
@@ -2650,207 +2677,88 @@ document.addEventListener("DOMContentLoaded", async () => {
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);
 
-  // Lokális PMTiles a csomagban (Oroszlány + 15km, részletesebb városi rétegekkel)
-  const PM_HTTP_URL = new URL("./data/oroszlany_15km.pmtiles", window.location.href).toString();
+  // Lokális PMTiles a csomagban (Oroszlány + ~10km)
+  const PM_HTTP_URL = new URL("./data/oroszlany_10km.pmtiles", window.location.href).toString();
   const PM_URL = `pmtiles://${PM_HTTP_URL}`;
 
+  // Minimal, stabil stílus – a PMTiles protomaps rétegeiből
   const OSM_ATTR = '© <a href="https://openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
 
   const style = {
     version: 8,
     glyphs: "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
+    sprite: "https://protomaps.github.io/basemaps-assets/sprites/v4/light",
     sources: {
-      basemap: { type: "vector", url: PM_URL, attribution: OSM_ATTR }
+      "protomaps": { type: "vector", url: PM_URL, attribution: OSM_ATTR }
     },
-    layers: [
-      { id: "bg", type: "background", paint: { "background-color": "#f5f3ef" } },
-
-      { id: "landcover-wood", type: "fill", source: "basemap", "source-layer": "landcover",
-        filter: ["==", ["get", "class"], "wood"],
-        paint: { "fill-color": "#dbead2", "fill-opacity": 0.9 } },
-      { id: "landcover-grass", type: "fill", source: "basemap", "source-layer": "landcover",
-        filter: ["==", ["get", "class"], "grass"],
-        paint: { "fill-color": "#e6f0dd", "fill-opacity": 0.85 } },
-      { id: "landcover-farmland", type: "fill", source: "basemap", "source-layer": "landcover",
-        filter: ["==", ["get", "class"], "farmland"],
-        paint: { "fill-color": "#efe9cf", "fill-opacity": 0.85 } },
-
-      { id: "landuse-industrial", type: "fill", source: "basemap", "source-layer": "landuse",
-        filter: ["==", ["get", "class"], "industrial"],
-        paint: { "fill-color": "#e8e1d8", "fill-opacity": 0.9 } },
-      { id: "landuse-garages", type: "fill", source: "basemap", "source-layer": "landuse",
-        filter: ["==", ["get", "class"], "garages"],
-        paint: { "fill-color": "#ece6df", "fill-opacity": 0.8 } },
-      { id: "park-fill", type: "fill", source: "basemap", "source-layer": "park",
-        paint: { "fill-color": "#d7ebcf", "fill-opacity": 0.95 } },
-
-      { id: "water-fill", type: "fill", source: "basemap", "source-layer": "water",
-        paint: { "fill-color": "#b9dcff" } },
-      { id: "waterway-line", type: "line", source: "basemap", "source-layer": "waterway",
-        paint: {
-          "line-color": "#8cc3f0",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.6, 13, 1.4, 16, 2.2]
-        } },
-
-      { id: "building-fill", type: "fill", source: "basemap", "source-layer": "building",
-        minzoom: 13,
-        paint: { "fill-color": "#ded8cf", "fill-opacity": 0.95 } },
-      { id: "building-outline", type: "line", source: "basemap", "source-layer": "building",
-        minzoom: 13,
-        paint: { "line-color": "#c6bfb4", "line-width": 0.6 } },
-
-      { id: "road-path", type: "line", source: "basemap", "source-layer": "transportation",
-        filter: ["==", ["get", "class"], "path"],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#ccb890",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 13, 0.8, 16, 2.2],
-          "line-dasharray": [1.2, 1.2]
-        } },
-      { id: "road-track", type: "line", source: "basemap", "source-layer": "transportation",
-        filter: ["==", ["get", "class"], "track"],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#c8b089",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.0, 16, 2.8],
-          "line-dasharray": [2, 1]
-        } },
-      { id: "road-service", type: "line", source: "basemap", "source-layer": "transportation",
-        filter: ["==", ["get", "class"], "service"],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#ffffff",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4.6],
-          "line-opacity": 0.96
-        } },
-      { id: "road-minor", type: "line", source: "basemap", "source-layer": "transportation",
-        filter: ["==", ["get", "class"], "minor"],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#ffffff",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1.4, 16, 5.4],
-          "line-opacity": 0.98
-        } },
-      { id: "road-main", type: "line", source: "basemap", "source-layer": "transportation",
-        filter: ["match", ["get", "class"], ["primary", "secondary", "tertiary", "trunk"], true, false],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#f7d59c",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.8, 16, 6.6],
-          "line-opacity": 0.98
-        } },
-      { id: "road-motor", type: "line", source: "basemap", "source-layer": "transportation",
-        filter: ["match", ["get", "class"], ["motorway"], true, false],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#f4bb7a",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 2.0, 16, 7.2],
-          "line-opacity": 0.98
-        } },
-      { id: "road-rail", type: "line", source: "basemap", "source-layer": "transportation",
-        filter: ["==", ["get", "class"], "rail"],
-        paint: {
-          "line-color": "#8e8680",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.7, 16, 2.2],
-          "line-dasharray": [1.4, 1.2]
-        } },
-
-      { id: "place-town", type: "symbol", source: "basemap", "source-layer": "place",
-        filter: ["==", ["get", "class"], "town"],
-        layout: {
-          "text-field": ["coalesce", ["get", "name"], ["get", "name_int"]],
-          "text-font": ["Noto Sans Bold"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 8, 12, 13, 18],
-          "text-letter-spacing": 0.02
-        },
-        paint: {
-          "text-color": "#4f4a44",
-          "text-halo-color": "rgba(255,255,255,0.92)",
-          "text-halo-width": 1.4
-        } },
-      { id: "place-suburb", type: "symbol", source: "basemap", "source-layer": "place",
-        minzoom: 11,
-        filter: ["==", ["get", "class"], "suburb"],
-        layout: {
-          "text-field": ["coalesce", ["get", "name"], ["get", "name_int"]],
-          "text-font": ["Noto Sans Regular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 11, 10, 14, 13],
-          "text-letter-spacing": 0.02
-        },
-        paint: {
-          "text-color": "#6d655d",
-          "text-halo-color": "rgba(255,255,255,0.9)",
-          "text-halo-width": 1.2
-        } },
-      { id: "water-label", type: "symbol", source: "basemap", "source-layer": "water_name",
-        minzoom: 11,
-        layout: {
-          "text-field": ["coalesce", ["get", "name"], ["get", "name_int"]],
-          "text-font": ["Noto Sans Regular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 11, 10, 15, 13]
-        },
-        paint: {
-          "text-color": "#3f82c7",
-          "text-halo-color": "rgba(255,255,255,0.9)",
-          "text-halo-width": 1.2
-        } },
-      { id: "park-label", type: "symbol", source: "basemap", "source-layer": "park",
-        minzoom: 12,
-        layout: {
-          "text-field": ["coalesce", ["get", "name"], ["get", "name_int"]],
-          "text-font": ["Noto Sans Regular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 15, 12],
-          "text-max-width": 10
-        },
-        paint: {
-          "text-color": "#5d8c56",
-          "text-halo-color": "rgba(255,255,255,0.9)",
-          "text-halo-width": 1.1
-        } },
-      { id: "road-label", type: "symbol", source: "basemap", "source-layer": "transportation_name",
-        minzoom: 12,
-        layout: {
-          "symbol-placement": "line",
-          "text-field": ["coalesce", ["get", "name"], ["get", "name_int"]],
-          "text-font": ["Noto Sans Regular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 9, 16, 12],
-          "symbol-spacing": 300
-        },
-        paint: {
-          "text-color": "#6e655f",
-          "text-halo-color": "rgba(255,255,255,0.92)",
-          "text-halo-width": 1.1
-        } },
-      { id: "poi-label", type: "symbol", source: "basemap", "source-layer": "poi",
-        minzoom: 13,
-        filter: ["<=", ["coalesce", ["get", "rank"], 99], 8],
-        layout: {
-          "text-field": ["coalesce", ["get", "name"], ["get", "name_int"]],
-          "text-font": ["Noto Sans Regular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 13, 10, 16, 12],
-          "text-offset": [0, 0.7],
-          "text-anchor": "top",
-          "text-max-width": 10
-        },
-        paint: {
-          "text-color": "#5b524c",
-          "text-halo-color": "rgba(255,255,255,0.94)",
-          "text-halo-width": 1.1
-        } },
-      { id: "housenumber-label", type: "symbol", source: "basemap", "source-layer": "housenumber",
-        minzoom: 14,
-        layout: {
-          "text-field": ["get", "housenumber"],
-          "text-font": ["Noto Sans Regular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 14, 9, 16, 11]
-        },
-        paint: {
-          "text-color": "#7f746b",
-          "text-halo-color": "rgba(255,255,255,0.96)",
-          "text-halo-width": 1.1
-        } }
-    ]
+    layers: []
   };
+
+  // Utak vastagítása (mobilon/HiDPI-n különösen vékonynak látszik)
+  const ROAD_THICK_FACTOR = 4.0; // ha még kevés: 4.6
+
+  function thickenRoadLayers(layers, factor){
+    try{
+      if (!Array.isArray(layers)) return layers;
+
+      const isRoadLayer = (ly) => {
+        const id = String(ly && ly.id || "").toLowerCase();
+        const sl = String(ly && ly["source-layer"] || "").toLowerCase();
+        return (id.includes("road") || id.includes("roads") || id.includes("highway") || id.includes("transport") || id.includes("motorway"))
+            || (sl === "roads" || sl === "transportation");
+      };
+
+      const scaleNum = (v) => (typeof v === "number" ? v * factor : v);
+
+      const scaleZoomExpr = (expr) => {
+        if (!Array.isArray(expr)) return expr;
+        const op = expr[0];
+
+        // ["interpolate", ["linear"], ["zoom"], z1, out1, z2, out2, ...]
+        if (op === "interpolate" && Array.isArray(expr[2]) && expr[2][0] === "zoom") {
+          const out = expr.slice();
+          for (let i = 4; i < out.length; i += 2) out[i] = scaleNum(out[i]);
+          return out;
+        }
+
+        // ["step", ["zoom"], out0, z1, out1, z2, out2, ...]
+        if (op === "step" && Array.isArray(expr[1]) && expr[1][0] === "zoom") {
+          const out = expr.slice();
+          if (out.length >= 3) out[2] = scaleNum(out[2]);
+          for (let i = 4; i < out.length; i += 2) out[i] = scaleNum(out[i]);
+          return out;
+        }
+
+        // Ne nyúljunk más expression-höz (pl. "*", "case", stb.) – könnyen invalid lesz.
+        return expr;
+      };
+
+      const mul = (v) => {
+        if (typeof v === "number") return v * factor;
+        if (Array.isArray(v) && (v[0] === "interpolate" || v[0] === "step")) return scaleZoomExpr(v);
+        return v;
+      };
+
+      for (const ly of layers){
+        if (!ly || ly.type !== "line") continue;
+        if (!isRoadLayer(ly)) continue;
+        if (!ly.paint) ly.paint = {};
+        if ("line-width" in ly.paint) ly.paint["line-width"] = mul(ly.paint["line-width"]);
+        if ("line-gap-width" in ly.paint) ly.paint["line-gap-width"] = mul(ly.paint["line-gap-width"]);
+      }
+      return layers;
+    } catch(_){
+      return layers;
+    }
+  }
+
+  if (window.basemaps) {
+    const layers = basemaps.layers("protomaps", basemaps.namedFlavor("light"), { lang: "hu" });
+    style.layers = thickenRoadLayers(layers, ROAD_THICK_FACTOR);
+  } else {
+    console.warn("basemaps.js nem töltődött be; a térkép rétegek hiányozhatnak.");
+    style.layers = [{ id:"bg", type:"background", paint:{ "background-color":"#f2f2f2" } }];
+  }
 
   map = new maplibregl.Map({
     container: "map",
@@ -3060,7 +2968,6 @@ if (navBtn) {
     } catch (_) {}
 
     // Forgatás/irány alkalmazása a kiválasztott navigáció mód szerint
-    try { _updateMyLocIconHeading(true); } catch (_) {}
     scheduleApplyNavBearing();
 
     // frissítsük az alsó "Középre" gomb láthatóságát is
@@ -4975,26 +4882,27 @@ function scheduleApplyNavBearing(){
     if (__cm_nav_bearing_raf) return;
     __cm_nav_bearing_raf = requestAnimationFrame(() => {
       __cm_nav_bearing_raf = null;
-
-      const moving = _isMovingForNav();
       const target = (navMode === "heading" && isFinite(lastHeadingDeg)) ? _normDeg(-lastHeadingDeg) : 0;
+
+      const now = Date.now();
       const cur = (typeof map.getBearing === 'function') ? map.getBearing() : 0;
       const curDelta = Math.abs(shortestAngleDelta(cur, target));
-      const now = Date.now();
 
-      const minDelta = (navMode === 'heading') ? (moving ? 4.0 : 12.0) : 0.8;
-      const minInterval = (navMode === 'heading') ? (moving ? 220 : 520) : 220;
-      if (curDelta < minDelta) return;
-      if ((now - __cm_nav_last_ts) < minInterval) return;
+      // ha már gyakorlatilag ott van, ne animáljunk feleslegesen
+      if (curDelta < 0.25) return;
+
+      const last = (typeof __cm_nav_last_applied === 'number' && isFinite(__cm_nav_last_applied)) ? __cm_nav_last_applied : null;
+      const lastDelta = (last !== null) ? Math.abs(shortestAngleDelta(last, target)) : 999;
+
+      // kis változásokat throttlingoljuk (kompasz zaj ellen)
+      const minInterval = (navMode === 'heading') ? 120 : 200;
+      if ((now - __cm_nav_last_ts) < minInterval && lastDelta < 1.2) return;
 
       __cm_nav_last_applied = target;
       __cm_nav_last_ts = now;
 
-      try { if (typeof map.stop === 'function') map.stop(); } catch (_) {}
-      map.easeTo({
-        bearing: target,
-        duration: (navMode === 'heading') ? (moving ? 220 : 320) : 220
-      });
+      // rövid animáció, hogy ne legyen "ugrás"
+      map.easeTo({ bearing: target, duration: 180 });
     });
   } catch (_) {}
 }
