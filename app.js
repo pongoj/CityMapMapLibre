@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.5";
+const APP_VERSION = "6.10.6";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -2720,7 +2720,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#cfc5b8",
-          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 10, 0.8, 12, 1.8, 14, 5.6, 16, 12.5, 18, 24.0, 20, 40.0],
+          "line-width": ["interpolate", ["exponential", 2.0], ["zoom"], 10, 0.35, 12, 0.8, 14, 2.6, 16, 8.5, 18, 18.0, 20, 34.0],
           "line-opacity": 0.95
         } },
       { id: "road-service", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2728,7 +2728,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#fffdfa",
-          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 10, 0.4, 12, 1.2, 14, 4.2, 16, 10.0, 18, 20.0, 20, 34.0],
+          "line-width": ["interpolate", ["exponential", 2.0], ["zoom"], 10, 0.18, 12, 0.5, 14, 1.8, 16, 6.5, 18, 14.5, 20, 28.0],
           "line-opacity": 0.98
         } },
       { id: "road-minor-case", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2736,7 +2736,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#c8beb0",
-          "line-width": ["interpolate", ["exponential", 1.9], ["zoom"], 10, 1.0, 12, 2.2, 14, 6.6, 16, 14.5, 18, 27.0, 20, 44.0],
+          "line-width": ["interpolate", ["exponential", 2.05], ["zoom"], 10, 0.45, 12, 1.0, 14, 3.0, 16, 10.5, 18, 21.0, 20, 38.0],
           "line-opacity": 0.96
         } },
       { id: "road-minor", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2744,7 +2744,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#fffefc",
-          "line-width": ["interpolate", ["exponential", 1.9], ["zoom"], 10, 0.5, 12, 1.5, 14, 5.0, 16, 12.0, 18, 23.0, 20, 38.0],
+          "line-width": ["interpolate", ["exponential", 2.05], ["zoom"], 10, 0.25, 12, 0.65, 14, 2.2, 16, 8.0, 18, 17.0, 20, 31.0],
           "line-opacity": 0.99
         } },
       { id: "road-main-case", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2752,7 +2752,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#bf8b3f",
-          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 8, 1.2, 10, 3.2, 12, 5.8, 14, 10.0, 16, 18.0, 18, 30.0, 20, 46.0],
+          "line-width": ["interpolate", ["exponential", 2.0], ["zoom"], 8, 0.8, 10, 1.8, 12, 3.8, 14, 7.2, 16, 15.0, 18, 26.0, 20, 42.0],
           "line-opacity": 0.98
         } },
       { id: "road-main", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2760,7 +2760,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#f7d18d",
-          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 8, 0.8, 10, 2.4, 12, 4.6, 14, 8.2, 16, 15.0, 18, 26.0, 20, 40.0],
+          "line-width": ["interpolate", ["exponential", 2.0], ["zoom"], 8, 0.45, 10, 1.3, 12, 2.9, 14, 5.8, 16, 12.5, 18, 22.0, 20, 36.0],
           "line-opacity": 0.99
         } },
       { id: "road-motor-case", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2768,7 +2768,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#b46f32",
-          "line-width": ["interpolate", ["exponential", 1.85], ["zoom"], 8, 1.8, 10, 4.0, 12, 7.0, 14, 12.0, 16, 20.0, 18, 32.0, 20, 48.0],
+          "line-width": ["interpolate", ["exponential", 2.0], ["zoom"], 8, 1.0, 10, 2.4, 12, 4.8, 14, 8.8, 16, 17.0, 18, 29.0, 20, 46.0],
           "line-opacity": 0.99
         } },
       { id: "road-motor", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2776,7 +2776,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#f4b66d",
-          "line-width": ["interpolate", ["exponential", 1.85], ["zoom"], 8, 1.2, 10, 3.0, 12, 5.8, 14, 10.2, 16, 17.5, 18, 28.5, 20, 43.0],
+          "line-width": ["interpolate", ["exponential", 2.0], ["zoom"], 8, 0.65, 10, 1.8, 12, 3.8, 14, 7.0, 16, 14.5, 18, 25.0, 20, 40.0],
           "line-opacity": 0.99
         } },
       { id: "road-rail", type: "line", source: "basemap", "source-layer": "transportation",
