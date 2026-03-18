@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.4";
+const APP_VERSION = "6.10.5";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -2704,7 +2704,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#ccb890",
-          "line-width": ["interpolate", ["exponential", 1.35], ["zoom"], 12, 1.8, 14, 3.6, 16, 6.5, 18, 9.5, 20, 13.0],
+          "line-width": ["interpolate", ["exponential", 1.5], ["zoom"], 12, 1.2, 14, 2.6, 16, 5.2, 18, 8.8, 20, 13.5],
           "line-dasharray": [1.2, 1.2]
         } },
       { id: "road-track", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2712,7 +2712,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#c8b089",
-          "line-width": ["interpolate", ["exponential", 1.35], ["zoom"], 12, 2.2, 14, 4.2, 16, 7.2, 18, 10.5, 20, 14.0],
+          "line-width": ["interpolate", ["exponential", 1.5], ["zoom"], 12, 1.4, 14, 3.0, 16, 6.0, 18, 10.0, 20, 15.0],
           "line-dasharray": [2, 1]
         } },
       { id: "road-service-case", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2720,7 +2720,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#cfc5b8",
-          "line-width": ["interpolate", ["exponential", 1.45], ["zoom"], 12, 4.8, 14, 9.8, 16, 15.5, 18, 21.0, 20, 27.0],
+          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 10, 0.8, 12, 1.8, 14, 5.6, 16, 12.5, 18, 24.0, 20, 40.0],
           "line-opacity": 0.95
         } },
       { id: "road-service", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2728,7 +2728,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#fffdfa",
-          "line-width": ["interpolate", ["exponential", 1.45], ["zoom"], 12, 3.8, 14, 8.2, 16, 13.0, 18, 18.0, 20, 23.0],
+          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 10, 0.4, 12, 1.2, 14, 4.2, 16, 10.0, 18, 20.0, 20, 34.0],
           "line-opacity": 0.98
         } },
       { id: "road-minor-case", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2736,7 +2736,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#c8beb0",
-          "line-width": ["interpolate", ["exponential", 1.5], ["zoom"], 11, 5.4, 14, 11.8, 16, 18.5, 18, 25.0, 20, 31.0],
+          "line-width": ["interpolate", ["exponential", 1.9], ["zoom"], 10, 1.0, 12, 2.2, 14, 6.6, 16, 14.5, 18, 27.0, 20, 44.0],
           "line-opacity": 0.96
         } },
       { id: "road-minor", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2744,7 +2744,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#fffefc",
-          "line-width": ["interpolate", ["exponential", 1.5], ["zoom"], 11, 4.2, 14, 9.6, 16, 15.5, 18, 21.0, 20, 26.0],
+          "line-width": ["interpolate", ["exponential", 1.9], ["zoom"], 10, 0.5, 12, 1.5, 14, 5.0, 16, 12.0, 18, 23.0, 20, 38.0],
           "line-opacity": 0.99
         } },
       { id: "road-main-case", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2752,7 +2752,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#bf8b3f",
-          "line-width": ["interpolate", ["exponential", 1.55], ["zoom"], 10, 6.6, 14, 14.5, 16, 21.5, 18, 28.0, 20, 35.0],
+          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 8, 1.2, 10, 3.2, 12, 5.8, 14, 10.0, 16, 18.0, 18, 30.0, 20, 46.0],
           "line-opacity": 0.98
         } },
       { id: "road-main", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2760,7 +2760,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#f7d18d",
-          "line-width": ["interpolate", ["exponential", 1.55], ["zoom"], 10, 5.4, 14, 12.4, 16, 18.8, 18, 24.8, 20, 31.0],
+          "line-width": ["interpolate", ["exponential", 1.8], ["zoom"], 8, 0.8, 10, 2.4, 12, 4.6, 14, 8.2, 16, 15.0, 18, 26.0, 20, 40.0],
           "line-opacity": 0.99
         } },
       { id: "road-motor-case", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2768,7 +2768,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#b46f32",
-          "line-width": ["interpolate", ["exponential", 1.6], ["zoom"], 9, 7.5, 14, 16.0, 16, 23.5, 18, 30.0, 20, 37.0],
+          "line-width": ["interpolate", ["exponential", 1.85], ["zoom"], 8, 1.8, 10, 4.0, 12, 7.0, 14, 12.0, 16, 20.0, 18, 32.0, 20, 48.0],
           "line-opacity": 0.99
         } },
       { id: "road-motor", type: "line", source: "basemap", "source-layer": "transportation",
@@ -2776,7 +2776,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#f4b66d",
-          "line-width": ["interpolate", ["exponential", 1.6], ["zoom"], 9, 6.0, 14, 14.0, 16, 20.8, 18, 27.0, 20, 33.0],
+          "line-width": ["interpolate", ["exponential", 1.85], ["zoom"], 8, 1.2, 10, 3.0, 12, 5.8, 14, 10.2, 16, 17.5, 18, 28.5, 20, 43.0],
           "line-opacity": 0.99
         } },
       { id: "road-rail", type: "line", source: "basemap", "source-layer": "transportation",
