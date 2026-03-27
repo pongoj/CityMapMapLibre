@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.7";
+const APP_VERSION = "6.10.8";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -878,17 +878,20 @@ const GPS_MIN_CENTER_INTERVAL_MS = 900;
 // - mozgás közben csak GPS/course irányt használunk
 // - alacsony sebességnél nem váltunk vissza azonnal iránytűre (hiszterézis)
 // - a kamera, a pozíció és a heading külön van szűrve
-const NAV_MOVE_ENTER_SPEED_MPS = 2.2;
-const NAV_MOVE_EXIT_SPEED_MPS = 0.9;
-const NAV_MOVE_SPEED_STALE_MS = 4500;
-const NAV_GEO_HEADING_MIN_ACC_M = 35;
-const NAV_GEO_HEADING_KEEP_MS = 8000;
-const NAV_COMPASS_STATIONARY_DEADBAND_DEG = 14;
-const NAV_COMPASS_MOVING_DEADBAND_DEG = 8;
-const NAV_CAMERA_MIN_INTERVAL_MOVING_MS = 1200;
-const NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS = 1800;
-const NAV_CAMERA_ALPHA_MOVING = 0.22;
-const NAV_CAMERA_ALPHA_STATIONARY = 0.10;
+const NAV_MOVE_ENTER_SPEED_MPS = 1.4;
+const NAV_MOVE_EXIT_SPEED_MPS = 0.55;
+const NAV_MOVE_SPEED_STALE_MS = 5000;
+const NAV_GEO_HEADING_MIN_ACC_M = 45;
+const NAV_GEO_HEADING_KEEP_MS = 7000;
+const NAV_COMPASS_STATIONARY_DEADBAND_DEG = 18;
+const NAV_COMPASS_MOVING_DEADBAND_DEG = 999;
+const NAV_CAMERA_MIN_INTERVAL_MOVING_MS = 700;
+const NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS = 1200;
+const NAV_CENTER_MIN_MOVE_MOVING_M = 3.5;
+const NAV_CENTER_MIN_MOVE_STATIONARY_M = 8.0;
+const NAV_BEARING_MIN_DELTA_MOVING_DEG = 4.5;
+const NAV_BEARING_MIN_DELTA_NORTH_DEG = 1.0;
+const NAV_BEARING_MIN_INTERVAL_MS = 320;
 
 let myLocFollowEnabled = true;
 // v5.41: Navigáció mód (térkép követés viselkedése)
@@ -936,85 +939,13 @@ function updateMyLocFabVisibility() {
   }
 }
 
-// v5.42.2: Map térkép forgatás (haladási irány mód)
-// Map core-ban nincs natív map-rotation, ezért egy wrapper DIV-et teszünk a
-// leaflet-map-pane köré, és azt forgatjuk CSS transform-mal.
-// Megjegyzés: kattintás (marker felvétel) esetén a lat/lng-et korrigálni kell,
-// ezért a map click eseménynél rotatedClickLatLng() van használva.
-let rotateWrapper = null;
-let mapBearingDeg = 0; // CSS rotate (fok) a wrapperen
-
-function initRotateWrapperIfNeeded(){ /* MapLibre: CSS rotate wrapper disabled */ }
-
-function setMapBearingDeg(targetDeg){
-  // DEPRECATED (v5.42.3): a tényleges forgatást egy időalapú animátor végzi
-  // a mapBearingTargetDeg felé, hogy a kompasz zaját kisimítsuk.
-  try { setMapBearingTargetDeg(targetDeg); } catch (_) {}
-}
-
-let mapBearingTargetDeg = 0;
-let _bearingAnimRaf = null;
-let _bearingAnimLastTs = 0;
-
-function setMapBearingTargetDeg(targetDeg){
-  mapBearingTargetDeg = _normDeg(targetDeg);
-  startBearingAnimator();
-}
-
-function stopBearingAnimatorIfIdle(){
-  if (_bearingAnimRaf && navMode !== "heading" && Math.abs(shortestAngleDelta(mapBearingDeg, 0)) < 0.15) {
-    try { cancelAnimationFrame(_bearingAnimRaf); } catch (_) {}
-    _bearingAnimRaf = null;
-  }
-}
-
-function startBearingAnimator(){
-  try {
-    // v6.x MapLibre: initRotateWrapperIfNeeded() kikapcsolva (CSS rotate wrapper nem kell)
-    if (!rotateWrapper) return;
-
-    if (_bearingAnimRaf) return;
-    _bearingAnimLastTs = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
-
-    const tick = () => {
-      _bearingAnimRaf = requestAnimationFrame(tick);
-
-      if (!rotateWrapper) {
-        // v6.x MapLibre: initRotateWrapperIfNeeded() kikapcsolva (CSS rotate wrapper nem kell)
-        if (!rotateWrapper) return;
-      }
-
-      const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
-      const dt = Math.min(0.05, Math.max(0.001, (now - _bearingAnimLastTs) / 1000));
-      _bearingAnimLastTs = now;
-
-      const delta = shortestAngleDelta(mapBearingDeg, mapBearingTargetDeg);
-      const absd = Math.abs(delta);
-
-      // deadband: a nagyon kicsi kompasz "remegést" ignoráljuk
-      const dead = 0.35; // fok
-      if (absd < dead) {
-        mapBearingDeg = mapBearingTargetDeg;
-        rotateWrapper.style.transform = `rotate(${mapBearingDeg}deg)`;
-        stopBearingAnimatorIfIdle();
-        return;
-      }
-
-      // max forgási sebesség (deg/sec) + extra csillapítás kis delta esetén
-      const maxRate = 200;
-      const maxStep = maxRate * dt;
-      let stepDeg = clamp(delta, -maxStep, maxStep);
-
-      const damp = absd > 35 ? 1.0 : absd > 15 ? 0.75 : 0.45;
-      stepDeg *= damp;
-
-      mapBearingDeg = _normDeg(mapBearingDeg + stepDeg);
-      rotateWrapper.style.transform = `rotate(${mapBearingDeg}deg)`;
-    };
-
-    _bearingAnimRaf = requestAnimationFrame(tick);
-  } catch (_) {}
-}
+// Korábbi Leaflet/CSS rotate logika eltávolítva.
+// MapLibre-ben a térkép forgatását közvetlenül a map.easeTo({ bearing }) kezeli.
+function initRotateWrapperIfNeeded(){}
+function setMapBearingDeg(_targetDeg){}
+function setMapBearingTargetDeg(_targetDeg){}
+function stopBearingAnimatorIfIdle(){}
+function startBearingAnimator(){}
 
 // Saját hely nyíl iránya (0..360). Ha a böngésző ad heading-et, azt használjuk,
 // különben két GPS pontból számolunk irányt (ha van elmozdulás).
@@ -1027,12 +958,8 @@ let _compassPermGranted = false;
 let _compassLastTs = 0;
 let _compassOutlierStreak = 0;
 
-// v5.42.4: kompasz + giroszkóp fúzió (remegés/ugrálás jelentős csökkentése)
-let gyroHeadingDeg = NaN;   // integrált yaw (deg)
-let fusedHeadingDeg = NaN;  // a ténylegesen használt heading
-let _motionLastTs = 0;
-let _gyroAvailable = false;
-let _motionInited = false;
+// A ténylegesen használt állóhelyi heading a kisimított iránytű értéke.
+let fusedHeadingDeg = NaN;
 
 // v5.42.4: legutóbbi sebesség becslés (ha mozgunk, ne írja felül a kompasz)
 let lastSpeedMps = NaN;
@@ -1041,7 +968,6 @@ let navMovingState = false;
 let navMovingStateTs = 0;
 let lastStableCourseDeg = NaN;
 let lastStableCourseTs = 0;
-let cameraFilteredCenter = null;
 
 function _recentSpeedMps(){
   try {
@@ -1232,13 +1158,6 @@ function _handleDeviceOrientation(e){
 
 
 
-// v6.9: devicemotion/gyro integráció kikapcsolva.
-// Több telefonon zajos, előjelesen eltérő és felesleges forgásremegést okozott.
-function _handleDeviceMotion(_e){}
-
-function startMotionIfPossible(){
-  return;
-}
 async function requestCompassPermissionIfNeeded(){
   // Csak user-gesture-ből hívjuk (gombnyomás), különben iOS nem engedi.
   try {
@@ -1265,7 +1184,6 @@ function startCompassIfPossible(){
   // Próbáljuk az abszolút eventet, ha van.
   window.addEventListener("deviceorientationabsolute", _handleDeviceOrientation, true);
   window.addEventListener("deviceorientation", _handleDeviceOrientation, true);
-  startMotionIfPossible();
 }
 
 let _prevHeadingRaw = null; // {lat,lng,ts}
@@ -1503,49 +1421,8 @@ function startMyLocationWatch() {
       const shouldFetchAddress = myLocationAddressText === "Saját hely";
       await ensureMyLocationMarker(filteredMyLocation.lat, filteredMyLocation.lng, shouldFetchAddress);
 
-      // Térkép követés: a kamera külön szűrt középpontot kap, hogy ne idegeskedjen.
-      if (myLocFollowEnabled) {
-        const moving = _isMovingForNav();
-        if (!cameraFilteredCenter) {
-          cameraFilteredCenter = { lat: filteredMyLocation.lat, lng: filteredMyLocation.lng };
-        } else {
-          const camAlpha = moving ? NAV_CAMERA_ALPHA_MOVING : NAV_CAMERA_ALPHA_STATIONARY;
-          cameraFilteredCenter = {
-            lat: cameraFilteredCenter.lat + (filteredMyLocation.lat - cameraFilteredCenter.lat) * camAlpha,
-            lng: cameraFilteredCenter.lng + (filteredMyLocation.lng - cameraFilteredCenter.lng) * camAlpha,
-          };
-        }
-
-        const minCenterInterval = moving ? NAV_CAMERA_MIN_INTERVAL_MOVING_MS : NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS;
-        const canCenterByTime = (nowTs - lastMyLocCenterTs) >= minCenterInterval;
-        let shouldCenter = false;
-
-        if (!lastCenteredMyLocation) {
-          shouldCenter = true;
-        } else {
-          const dc = distanceMeters(cameraFilteredCenter.lat, cameraFilteredCenter.lng, lastCenteredMyLocation.lat, lastCenteredMyLocation.lng);
-          const dynThreshold = moving
-            ? clamp(Math.max(8, acc * 0.45), 8, 18)
-            : clamp(Math.max(12, acc * 0.7), 12, 24);
-          if (dc >= dynThreshold) shouldCenter = true;
-        }
-
-        if (shouldCenter && canCenterByTime) {
-          lastMyLocCenterTs = nowTs;
-          lastCenteredMyLocation = { lat: cameraFilteredCenter.lat, lng: cameraFilteredCenter.lng };
-
-          try {
-            const easeOpts = {
-              center: [cameraFilteredCenter.lng, cameraFilteredCenter.lat],
-              duration: moving ? 850 : 650
-            };
-            if (navMode === "heading") {
-              easeOpts.offset = [0, navYOffsetPx()];
-            }
-            map.easeTo(easeOpts);
-          } catch (_) {}
-        }
-      }
+      // Közös nav-kamera + bearing frissítés (ne fusson külön center és külön bearing easeTo).
+      applyNavCameraAndBearing({ force: false, nowTs, accuracyM: acc });
 
       // v5.45: 'Középre' gomb frissítése
       updateMyLocFabVisibility();
@@ -1624,6 +1501,7 @@ async function centerToMyLocation() {
     map.setView([lastMyLocation.lat, lastMyLocation.lng], 20, { animate: true, duration: 0.6 });
     lastCenteredMyLocation = { lat: lastMyLocation.lat, lng: lastMyLocation.lng };
     await ensureMyLocationMarker(lastMyLocation.lat, lastMyLocation.lng, false);
+    applyNavCameraAndBearing({ force: true, nowTs: Date.now(), accuracyM: lastMyLocationAccM });
     startMyLocationWatch();
     return true;
   }
@@ -1642,6 +1520,7 @@ async function centerToMyLocation() {
         map.setView([lat, lng], 20, { animate: true, duration: 0.6 });
         lastCenteredMyLocation = { lat, lng };
         await ensureMyLocationMarker(lat, lng, true);
+        applyNavCameraAndBearing({ force: true, nowTs: Date.now(), accuracyM: lastMyLocationAccM });
 
         startMyLocationWatch();
         resolve(true);
@@ -1671,6 +1550,7 @@ async function centerToMyLocation() {
   map.setView([lastMyLocation.lat, lastMyLocation.lng], 20, { animate: true, duration: 0.6 });
   lastCenteredMyLocation = { lat: lastMyLocation.lat, lng: lastMyLocation.lng };
   await ensureMyLocationMarker(lastMyLocation.lat, lastMyLocation.lng, true);
+  applyNavCameraAndBearing({ force: true, nowTs: Date.now(), accuracyM: lastMyLocationAccM });
   return true;
 }
 
@@ -3115,7 +2995,6 @@ if (btnMyLocFab) {
     try { await requestCompassPermissionIfNeeded(); } catch (_) {}
     startCompassIfPossible();
     myLocFollowEnabled = true;
-    cameraFilteredCenter = null;
 
     const ok = await centerToMyLocation();
     if (!ok) {
@@ -5068,43 +4947,78 @@ async function refreshFilterData() {
 function rotatedClickLatLng(e){ return (e && e.latlng) ? e.latlng : { lat: 0, lng: 0 }; }
 
 let __cm_nav_bearing_raf = null;
-let __cm_nav_last_applied = null;
-let __cm_nav_last_ts = 0;
+
+function _getNavBearingTarget(){
+  if (!map || typeof map.getBearing !== "function") return null;
+  if (navMode !== 'heading') return 0;
+  if (!_isMovingForNav()) return null;
+  if (typeof lastHeadingDeg !== 'number' || !isFinite(lastHeadingDeg)) return null;
+  return _normDeg(-lastHeadingDeg);
+}
+
+function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM = lastMyLocationAccM } = {}){
+  try {
+    if (!map || !lastMyLocation || !myLocFollowEnabled) return;
+
+    const moving = _isMovingForNav();
+    const targetCenter = [Number(lastMyLocation.lng), Number(lastMyLocation.lat)];
+    const targetBearing = _getNavBearingTarget();
+    const currentCenter = (typeof map.getCenter === 'function') ? map.getCenter() : null;
+    const currentBearing = (typeof map.getBearing === 'function') ? map.getBearing() : 0;
+
+    const centerDeltaM = currentCenter
+      ? distanceMeters(lastMyLocation.lat, lastMyLocation.lng, currentCenter.lat, currentCenter.lng)
+      : Infinity;
+    const bearingDeltaDeg = (targetBearing === null || targetBearing === undefined)
+      ? 0
+      : Math.abs(shortestAngleDelta(currentBearing, targetBearing));
+
+    const centerThreshold = moving
+      ? clamp(Math.max(NAV_CENTER_MIN_MOVE_MOVING_M, (Number(accuracyM) || 0) * 0.22), NAV_CENTER_MIN_MOVE_MOVING_M, 10)
+      : clamp(Math.max(NAV_CENTER_MIN_MOVE_STATIONARY_M, (Number(accuracyM) || 0) * 0.45), NAV_CENTER_MIN_MOVE_STATIONARY_M, 18);
+
+    const bearingThreshold = (navMode === 'heading')
+      ? NAV_BEARING_MIN_DELTA_MOVING_DEG
+      : NAV_BEARING_MIN_DELTA_NORTH_DEG;
+
+    const minInterval = moving ? NAV_CAMERA_MIN_INTERVAL_MOVING_MS : NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS;
+    const timeOk = force || ((nowTs - lastMyLocCenterTs) >= minInterval);
+    const needCenter = force || !lastCenteredMyLocation || centerDeltaM >= centerThreshold;
+    const needBearing = force || (targetBearing !== null && bearingDeltaDeg >= bearingThreshold) || (navMode !== 'heading' && Math.abs(currentBearing) >= bearingThreshold);
+
+    if (!timeOk && !force) return;
+    if (!needCenter && !needBearing) return;
+
+    const easeOpts = {
+      center: targetCenter,
+      duration: moving ? 700 : 500,
+      essential: true,
+      easing: (t) => 1 - Math.pow(1 - t, 3)
+    };
+
+    if (navMode === 'heading' && moving && targetBearing !== null) {
+      easeOpts.bearing = targetBearing;
+      easeOpts.offset = [0, navYOffsetPx()];
+    } else {
+      easeOpts.bearing = 0;
+      easeOpts.offset = [0, 0];
+    }
+
+    map.easeTo(easeOpts);
+    lastMyLocCenterTs = nowTs;
+    lastCenteredMyLocation = { lat: lastMyLocation.lat, lng: lastMyLocation.lng };
+  } catch (err) {
+    console.warn('applyNavCameraAndBearing failed', err);
+  }
+}
+
 function scheduleApplyNavBearing(){
   try {
-    if (!map || typeof map.getBearing !== "function") return;
+    if (!map) return;
     if (__cm_nav_bearing_raf) return;
     __cm_nav_bearing_raf = requestAnimationFrame(() => {
       __cm_nav_bearing_raf = null;
-
-      const moving = _isMovingForNav();
-      const now = Date.now();
-      let target = 0;
-
-      if (navMode === 'heading') {
-        const stable = _recentStableCourse();
-        if (moving && isFinite(stable)) {
-          target = _normDeg(-stable);
-        } else {
-          return; // álló helyzetben ne forgassuk a térképet zajra
-        }
-      }
-
-      const cur = (typeof map.getBearing === 'function') ? map.getBearing() : 0;
-      const curDelta = Math.abs(shortestAngleDelta(cur, target));
-      const minDelta = (navMode === 'heading') ? 8.0 : 1.0;
-      const minInterval = (navMode === 'heading') ? 420 : 260;
-      if (curDelta < minDelta) return;
-      if ((now - __cm_nav_last_ts) < minInterval) return;
-
-      __cm_nav_last_applied = target;
-      __cm_nav_last_ts = now;
-
-      map.easeTo({
-        bearing: target,
-        duration: (navMode === 'heading') ? 520 : 260,
-        easing: (t) => 1 - Math.pow(1 - t, 3)
-      });
+      applyNavCameraAndBearing({ force: false, nowTs: Date.now(), accuracyM: lastMyLocationAccM });
     });
   } catch (_) {}
 }
