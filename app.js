@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.9";
+const APP_VERSION = "6.10.10";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -970,6 +970,68 @@ let navMovingState = false;
 let navMovingStateTs = 0;
 let lastStableCourseDeg = NaN;
 let lastStableCourseTs = 0;
+let locationSourceIndicator = "?"; // G = GPS-szeru fix (becsles), N = halozati/coarse fix (becsles)
+let locationSourceAccuracyM = NaN;
+
+function _updateLocationSourceBadge(){
+  try {
+    const host = document.getElementById("appVersion");
+    if (!host) return;
+    let badge = document.getElementById("locSourceBadge");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.id = "locSourceBadge";
+      badge.style.display = "inline-flex";
+      badge.style.alignItems = "center";
+      badge.style.justifyContent = "center";
+      badge.style.minWidth = "18px";
+      badge.style.height = "18px";
+      badge.style.marginLeft = "6px";
+      badge.style.padding = "0 6px";
+      badge.style.borderRadius = "999px";
+      badge.style.fontWeight = "700";
+      badge.style.fontSize = "11px";
+      badge.style.lineHeight = "18px";
+      badge.style.border = "1px solid rgba(0,0,0,.10)";
+      host.appendChild(badge);
+    }
+    const mode = locationSourceIndicator || "?";
+    badge.textContent = mode;
+    if (mode === "G") {
+      badge.style.background = "#e6f6ea";
+      badge.style.color = "#196c2e";
+      badge.style.borderColor = "rgba(25,108,46,.18)";
+    } else if (mode === "N") {
+      badge.style.background = "#fff4e5";
+      badge.style.color = "#8a5a00";
+      badge.style.borderColor = "rgba(138,90,0,.18)";
+    } else {
+      badge.style.background = "#eef2f7";
+      badge.style.color = "#4b5563";
+      badge.style.borderColor = "rgba(75,85,99,.16)";
+    }
+    const acc = (typeof locationSourceAccuracyM === "number" && isFinite(locationSourceAccuracyM)) ? `, pontossag kb. ±${Math.round(locationSourceAccuracyM)} m` : "";
+    badge.title = (mode === "G")
+      ? `Helyforras: GPS-szeru fix (becsles${acc})`
+      : (mode === "N")
+        ? `Helyforras: halozati/coarse fix (becsles${acc})`
+        : "Helyforras: ismeretlen (varunk poziciora)";
+  } catch (_) {}
+}
+
+function _classifyLocationSource(coords){
+  try {
+    const acc = (coords && typeof coords.accuracy === "number" && isFinite(coords.accuracy)) ? Number(coords.accuracy) : NaN;
+    const hasHeading = !!(coords && typeof coords.heading === "number" && isFinite(coords.heading));
+    const hasSpeed = !!(coords && typeof coords.speed === "number" && isFinite(coords.speed));
+    locationSourceAccuracyM = acc;
+    // A webes Geolocation API nem mondja meg biztosan a forrast, ez csak gyakorlati becsles.
+    // GPS-szerunek vesszuk, ha a fix jo pontossagu, vagy a platform heading/speed adatot is ad.
+    const gpsLike = (isFinite(acc) && acc <= 35) || ((hasHeading || hasSpeed) && (!isFinite(acc) || acc <= 60));
+    locationSourceIndicator = gpsLike ? "G" : "N";
+    _updateLocationSourceBadge();
+  } catch (_) {}
+}
 
 function _recentSpeedMps(){
   try {
@@ -1313,6 +1375,7 @@ function startMyLocationWatch() {
 
       // v6.3: pontosság cache a saját hely layerhez
       lastMyLocationAccM = acc;
+      _classifyLocationSource(pos.coords);
 
       // Heading források:
       // - mozgás közben kizárólag GPS/course (vagy két GPS pontból számolt bearing)
@@ -1516,6 +1579,7 @@ async function centerToMyLocation() {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         lastMyLocationAccM = (typeof pos.coords.accuracy === "number" && isFinite(pos.coords.accuracy)) ? pos.coords.accuracy : lastMyLocationAccM;
+        _classifyLocationSource(pos.coords);
         lastMyLocation = { lat, lng, ts: Date.now() };
 
         lastMyLocCenterTs = Date.now();
@@ -2579,6 +2643,7 @@ function registerSW() {
 document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("online", checkForUpdateOnline);
   document.getElementById("appVersion").textContent = "v" + APP_VERSION;
+  _updateLocationSourceBadge();
   registerSW();
   checkForUpdateOnline();
 
@@ -3027,6 +3092,12 @@ if (navBtn) {
     navMode = (navMode === "heading") ? "north" : "heading";
     localStorage.setItem("citymap_nav_mode", navMode);
     syncNavBtn();
+
+    // Eszak-felul modban azonnal alljunk vissza 0 bearingre, ne maradjon bent elozo forgatas.
+    if (navMode === "north") {
+      try { if (map && typeof map.stop === "function") map.stop(); } catch (_) {}
+      try { if (map && typeof map.jumpTo === "function") map.jumpTo({ bearing: 0 }); } catch (_) {}
+    }
 
     // Mindkét mód váltáskor: követés bekapcsol és saját hely középre
     myLocFollowEnabled = true;
@@ -4955,12 +5026,14 @@ function _getNavBearingTarget(){
 
   const moving = _isMovingForNav();
   if (moving && typeof lastHeadingDeg === 'number' && isFinite(lastHeadingDeg)) {
-    return _normDeg(-lastHeadingDeg);
+    // MapLibre bearing: melyik vilagirany legyen felul a kijelzon.
+    // Haladasi modban a haladas iranya legyen felul, tehat NEM az inverz, hanem a heading maga.
+    return _normDeg(lastHeadingDeg);
   }
 
   const stableCourse = _recentStableCourse();
   if (typeof stableCourse === 'number' && isFinite(stableCourse)) {
-    return _normDeg(-stableCourse);
+    return _normDeg(stableCourse);
   }
 
   return null;
@@ -5003,7 +5076,8 @@ function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM
       }
     } else {
       const d = Math.abs(shortestAngleDelta(currentBearing, 0));
-      needBearing = force || d >= NAV_BEARING_MIN_DELTA_NORTH_DEG;
+      // Eszak-felul modban mindig agresszivebben alljunk vissza 0-ra, hogy semmi ne maradjon bent elozo modbol.
+      needBearing = force || d >= 1.0;
     }
 
     const minInterval = moving ? NAV_CAMERA_MIN_INTERVAL_MOVING_MS : NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS;
@@ -5028,6 +5102,9 @@ function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM
     }
 
     try { if (typeof map.stop === 'function') map.stop(); } catch (_) {}
+    if (navMode !== 'heading' && !needCenter && needBearing && Math.abs(shortestAngleDelta(currentBearing, 0)) >= 8 && typeof map.jumpTo === 'function') {
+      map.jumpTo({ bearing: 0 });
+    }
     map.easeTo(easeOpts);
     lastMyLocCenterTs = nowTs;
     lastCenteredMyLocation = { lat: lastMyLocation.lat, lng: lastMyLocation.lng };
