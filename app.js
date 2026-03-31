@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.10";
+const APP_VERSION = "6.10.11";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -885,15 +885,15 @@ const NAV_GEO_HEADING_MIN_ACC_M = 60;
 const NAV_GEO_HEADING_KEEP_MS = 9000;
 const NAV_COMPASS_STATIONARY_DEADBAND_DEG = 18;
 const NAV_COMPASS_MOVING_DEADBAND_DEG = 999;
-const NAV_CAMERA_MIN_INTERVAL_MOVING_MS = 260;
-const NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS = 700;
+const NAV_CAMERA_MIN_INTERVAL_MOVING_MS = 380;
+const NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS = 900;
 const NAV_CENTER_MIN_MOVE_MOVING_M = 2.0;
 const NAV_CENTER_MIN_MOVE_STATIONARY_M = 5.0;
 const NAV_BEARING_MIN_DELTA_MOVING_DEG = 6.0;
 const NAV_BEARING_MIN_DELTA_NORTH_DEG = 1.5;
 const NAV_BEARING_MIN_INTERVAL_MS = 220;
-const NAV_SCREEN_DEADBAND_MOVING_PX = 14;
-const NAV_SCREEN_DEADBAND_STATIONARY_PX = 22;
+const NAV_SCREEN_DEADBAND_MOVING_PX = 30;
+const NAV_SCREEN_DEADBAND_STATIONARY_PX = 40;
 
 let myLocFollowEnabled = true;
 // v5.41: Navigáció mód (térkép követés viselkedése)
@@ -924,20 +924,25 @@ function updateMyLocFabVisibility() {
     return;
   }
 
+  // Amíg az automatikus követés aktív, a „Középre” gomb ne villogjon fel.
+  // Ekkor a kamera programból követi a saját helyet, tehát a gombnak nincs dolga.
+  if (myLocFollowEnabled) {
+    btn.style.display = "none";
+    return;
+  }
+
   try {
     const p = map.latLngToContainerPoint([lastMyLocation.lat, lastMyLocation.lng]);
     const s = map.getSize();
-    const cx = s.x / 2, cy = s.y / 2;
-    const dx = p.x - cx;
-    const dy = p.y - cy;
+    const desiredX = s.x / 2;
+    const desiredY = s.y / 2 + ((navMode === "heading") ? navYOffsetPx() : 0);
+    const dx = p.x - desiredX;
+    const dy = p.y - desiredY;
     const dist = Math.hypot(dx, dy);
-
-    // 28px ~ kb. "középen van" tolerancia
-    const THRESH_PX = 28;
-    const show = dist > THRESH_PX;
-    btn.style.display = show ? "inline-flex" : "none";
+    const THRESH_PX = (navMode === "heading") ? 34 : 26;
+    btn.style.display = dist > THRESH_PX ? "inline-flex" : "none";
   } catch (_) {
-    btn.style.display = "none";
+    btn.style.display = "inline-flex";
   }
 }
 
@@ -1016,6 +1021,45 @@ function _updateLocationSourceBadge(){
       : (mode === "N")
         ? `Helyforras: halozati/coarse fix (becsles${acc})`
         : "Helyforras: ismeretlen (varunk poziciora)";
+  } catch (_) {}
+}
+
+function _updateNorthBadge(){
+  try {
+    const host = document.getElementById("appVersion");
+    if (!host) return;
+    let badge = document.getElementById("northBadge");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.id = "northBadge";
+      badge.style.display = "inline-flex";
+      badge.style.alignItems = "center";
+      badge.style.gap = "4px";
+      badge.style.marginLeft = "6px";
+      badge.style.padding = "0 6px";
+      badge.style.height = "18px";
+      badge.style.borderRadius = "999px";
+      badge.style.border = "1px solid rgba(0,0,0,.10)";
+      badge.style.background = "#eef2f7";
+      badge.style.color = "#334155";
+      badge.style.fontSize = "11px";
+      badge.style.fontWeight = "700";
+      const arrow = document.createElement("span");
+      arrow.id = "northBadgeArrow";
+      arrow.textContent = "↑";
+      arrow.style.display = "inline-block";
+      arrow.style.transformOrigin = "50% 50%";
+      arrow.style.transition = "transform 120ms linear";
+      const label = document.createElement("span");
+      label.textContent = "N";
+      badge.appendChild(arrow);
+      badge.appendChild(label);
+      host.appendChild(badge);
+    }
+    const arrow = document.getElementById("northBadgeArrow");
+    const bearing = (map && typeof map.getBearing === "function" && isFinite(map.getBearing())) ? Number(map.getBearing()) : 0;
+    if (arrow) arrow.style.transform = `rotate(${-bearing}deg)`;
+    badge.title = "Észak iránya a kijelzőhöz képest";
   } catch (_) {}
 }
 
@@ -2644,6 +2688,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("online", checkForUpdateOnline);
   document.getElementById("appVersion").textContent = "v" + APP_VERSION;
   _updateLocationSourceBadge();
+  _updateNorthBadge();
   registerSW();
   checkForUpdateOnline();
 
@@ -3007,8 +3052,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // A "Saját helyem" gomb visszakapcsolja.
   map.on("dragstart", (e) => { if (e && e.originalEvent) myLocFollowEnabled = false; });
   map.on("zoomstart", (e) => { if (e && e.originalEvent) myLocFollowEnabled = false; });
-  map.on("moveend", () => updateMyLocFabVisibility());
-  map.on("zoomend", () => updateMyLocFabVisibility());
+  map.on("moveend", () => { updateMyLocFabVisibility(); _updateNorthBadge(); });
+  map.on("zoomend", () => { updateMyLocFabVisibility(); _updateNorthBadge(); });
+  map.on("rotate", () => _updateNorthBadge());
 
 
   await DB.init();
@@ -5041,7 +5087,10 @@ function _getNavBearingTarget(){
 
 function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM = lastMyLocationAccM } = {}){
   try {
-    if (!map || !lastMyLocation || !myLocFollowEnabled) return;
+    if (!map || !lastMyLocation || !myLocFollowEnabled) {
+      _updateNorthBadge();
+      return;
+    }
 
     const moving = _isMovingForNav();
     const targetCenter = [Number(lastMyLocation.lng), Number(lastMyLocation.lat)];
@@ -5065,49 +5114,67 @@ function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM
       : Infinity;
 
     const centerThresholdPx = moving ? NAV_SCREEN_DEADBAND_MOVING_PX : NAV_SCREEN_DEADBAND_STATIONARY_PX;
-    const centerThresholdAccPx = clamp((Number(accuracyM) || 0) * 0.35, 0, moving ? 8 : 14);
+    const centerThresholdAccPx = clamp((Number(accuracyM) || 0) * 0.22, 0, moving ? 10 : 16);
     const needCenter = force || pixelDelta >= (centerThresholdPx + centerThresholdAccPx);
 
     let needBearing = false;
+    let bearingTarget = null;
     if (navMode === 'heading') {
       if (targetBearing !== null && targetBearing !== undefined) {
         const d = Math.abs(shortestAngleDelta(currentBearing, targetBearing));
-        needBearing = force || d >= NAV_BEARING_MIN_DELTA_MOVING_DEG;
+        needBearing = force || d >= (moving ? 5.5 : 8.0);
+        bearingTarget = targetBearing;
       }
     } else {
       const d = Math.abs(shortestAngleDelta(currentBearing, 0));
-      // Eszak-felul modban mindig agresszivebben alljunk vissza 0-ra, hogy semmi ne maradjon bent elozo modbol.
       needBearing = force || d >= 1.0;
+      bearingTarget = 0;
     }
 
     const minInterval = moving ? NAV_CAMERA_MIN_INTERVAL_MOVING_MS : NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS;
-    if (!force && (nowTs - lastMyLocCenterTs) < minInterval && !needBearing) return;
-    if (!needCenter && !needBearing) return;
+    if (!force && (nowTs - lastMyLocCenterTs) < minInterval && !needCenter) {
+      _updateNorthBadge();
+      return;
+    }
+    if (!needCenter && !needBearing) {
+      _updateNorthBadge();
+      return;
+    }
 
     const easeOpts = {
-      center: targetCenter,
-      duration: force ? 380 : (moving ? 260 : 320),
       essential: true,
       easing: (t) => 1 - Math.pow(1 - t, 2)
     };
 
-    if (navMode === 'heading') {
-      if (targetBearing !== null && targetBearing !== undefined) {
-        easeOpts.bearing = targetBearing;
-      }
-      easeOpts.offset = [0, navYOffsetPx()];
-    } else {
-      easeOpts.bearing = 0;
-      easeOpts.offset = [0, 0];
+    if (needCenter || force) {
+      easeOpts.center = targetCenter;
+      easeOpts.offset = (navMode === 'heading') ? [0, navYOffsetPx()] : [0, 0];
     }
 
-    try { if (typeof map.stop === 'function') map.stop(); } catch (_) {}
-    if (navMode !== 'heading' && !needCenter && needBearing && Math.abs(shortestAngleDelta(currentBearing, 0)) >= 8 && typeof map.jumpTo === 'function') {
-      map.jumpTo({ bearing: 0 });
+    if (needBearing && bearingTarget !== null && bearingTarget !== undefined) {
+      easeOpts.bearing = bearingTarget;
     }
-    map.easeTo(easeOpts);
+
+    const bigMove = pixelDelta > (moving ? 90 : 120);
+    if (force) {
+      easeOpts.duration = 260;
+    } else if (needCenter && needBearing) {
+      easeOpts.duration = moving ? (bigMove ? 520 : 420) : 520;
+    } else if (needCenter) {
+      easeOpts.duration = moving ? (bigMove ? 480 : 360) : 460;
+    } else {
+      easeOpts.duration = moving ? 220 : 260;
+    }
+
+    if (typeof map.easeTo === 'function') {
+      map.easeTo(easeOpts);
+    } else if (typeof map.jumpTo === 'function') {
+      map.jumpTo(easeOpts);
+    }
+
     lastMyLocCenterTs = nowTs;
     lastCenteredMyLocation = { lat: lastMyLocation.lat, lng: lastMyLocation.lng };
+    _updateNorthBadge();
   } catch (err) {
     console.warn('applyNavCameraAndBearing failed', err);
   }
