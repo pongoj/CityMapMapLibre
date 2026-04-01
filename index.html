@@ -131,6 +131,10 @@
       font: 12px system-ui, -apple-system, Segoe UI, Roboto, Arial;
       box-shadow: 0 2px 8px rgba(0,0,0,.14);
     }
+
+    .maplibregl-ctrl-bottom-right .maplibregl-ctrl{ margin: 0 4px 4px 0; }
+    .maplibregl-ctrl-attrib{ font-size: 11px; max-width: min(50vw, 220px); }
+    .maplibregl-ctrl-attrib.maplibregl-compact{ background: rgba(255,255,255,.9); border-radius: 999px; }
     #hint{
       position:fixed; left:10px; top:60px; z-index:1200;
       background: rgba(0,0,0,.65); color:#fff;
@@ -1094,6 +1098,7 @@
   </div>
 
   <script src="db.js"></script>
+  <script src="ui.js"></script>
   <script src="map.js"></script>
   <script src="nav.js"></script>
   <script src="app.js"></script>

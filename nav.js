@@ -130,89 +130,12 @@ let lastStableCourseTs = 0;
 let locationSourceIndicator = "?"; // G = GPS-szeru fix (becsles), N = halozati/coarse fix (becsles)
 let locationSourceAccuracyM = NaN;
 
-function _updateLocationSourceBadge(){
+function _getNorthBadgeHeadingDeg(){
   try {
-    const host = document.getElementById("appVersion");
-    if (!host) return;
-    let badge = document.getElementById("locSourceBadge");
-    if (!badge) {
-      badge = document.createElement("span");
-      badge.id = "locSourceBadge";
-      badge.style.display = "inline-flex";
-      badge.style.alignItems = "center";
-      badge.style.justifyContent = "center";
-      badge.style.minWidth = "18px";
-      badge.style.height = "18px";
-      badge.style.marginLeft = "6px";
-      badge.style.padding = "0 6px";
-      badge.style.borderRadius = "999px";
-      badge.style.fontWeight = "700";
-      badge.style.fontSize = "11px";
-      badge.style.lineHeight = "18px";
-      badge.style.border = "1px solid rgba(0,0,0,.10)";
-      host.appendChild(badge);
-    }
-    const mode = locationSourceIndicator || "?";
-    badge.textContent = mode;
-    if (mode === "G") {
-      badge.style.background = "#e6f6ea";
-      badge.style.color = "#196c2e";
-      badge.style.borderColor = "rgba(25,108,46,.18)";
-    } else if (mode === "N") {
-      badge.style.background = "#fff4e5";
-      badge.style.color = "#8a5a00";
-      badge.style.borderColor = "rgba(138,90,0,.18)";
-    } else {
-      badge.style.background = "#eef2f7";
-      badge.style.color = "#4b5563";
-      badge.style.borderColor = "rgba(75,85,99,.16)";
-    }
-    const acc = (typeof locationSourceAccuracyM === "number" && isFinite(locationSourceAccuracyM)) ? `, pontossag kb. ±${Math.round(locationSourceAccuracyM)} m` : "";
-    badge.title = (mode === "G")
-      ? `Helyforras: GPS-szeru fix (becsles${acc})`
-      : (mode === "N")
-        ? `Helyforras: halozati/coarse fix (becsles${acc})`
-        : "Helyforras: ismeretlen (varunk poziciora)";
+    if (typeof fusedHeadingDeg === "number" && isFinite(fusedHeadingDeg)) return _normDeg(fusedHeadingDeg);
+    if (typeof compassHeadingDeg === "number" && isFinite(compassHeadingDeg)) return _normDeg(compassHeadingDeg);
   } catch (_) {}
-}
-
-function _updateNorthBadge(){
-  try {
-    const host = document.getElementById("appVersion");
-    if (!host) return;
-    let badge = document.getElementById("northBadge");
-    if (!badge) {
-      badge = document.createElement("span");
-      badge.id = "northBadge";
-      badge.style.display = "inline-flex";
-      badge.style.alignItems = "center";
-      badge.style.gap = "4px";
-      badge.style.marginLeft = "6px";
-      badge.style.padding = "0 6px";
-      badge.style.height = "18px";
-      badge.style.borderRadius = "999px";
-      badge.style.border = "1px solid rgba(0,0,0,.10)";
-      badge.style.background = "#eef2f7";
-      badge.style.color = "#334155";
-      badge.style.fontSize = "11px";
-      badge.style.fontWeight = "700";
-      const arrow = document.createElement("span");
-      arrow.id = "northBadgeArrow";
-      arrow.textContent = "↑";
-      arrow.style.display = "inline-block";
-      arrow.style.transformOrigin = "50% 50%";
-      arrow.style.transition = "transform 120ms linear";
-      const label = document.createElement("span");
-      label.textContent = "N";
-      badge.appendChild(arrow);
-      badge.appendChild(label);
-      host.appendChild(badge);
-    }
-    const arrow = document.getElementById("northBadgeArrow");
-    const bearing = (map && typeof map.getBearing === "function" && isFinite(map.getBearing())) ? Number(map.getBearing()) : 0;
-    if (arrow) arrow.style.transform = `rotate(${-bearing}deg)`;
-    badge.title = "Észak iránya a kijelzőhöz képest";
-  } catch (_) {}
+  return NaN;
 }
 
 function _classifyLocationSource(coords){
@@ -225,7 +148,7 @@ function _classifyLocationSource(coords){
     // GPS-szerunek vesszuk, ha a fix jo pontossagu, vagy a platform heading/speed adatot is ad.
     const gpsLike = (isFinite(acc) && acc <= 35) || ((hasHeading || hasSpeed) && (!isFinite(acc) || acc <= 60));
     locationSourceIndicator = gpsLike ? "G" : "N";
-    _updateLocationSourceBadge();
+    window.CMUI && window.CMUI.updateLocationSourceBadge(locationSourceIndicator, locationSourceAccuracyM);
   } catch (_) {}
 }
 
@@ -889,7 +812,7 @@ function _getNavBearingTarget(){
 function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM = lastMyLocationAccM } = {}){
   try {
     if (!map || !lastMyLocation || !myLocFollowEnabled) {
-      _updateNorthBadge();
+      window.CMUI && window.CMUI.updateNorthBadge(_getNorthBadgeHeadingDeg(), map);
       return;
     }
 
@@ -934,11 +857,11 @@ function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM
 
     const minInterval = moving ? NAV_CAMERA_MIN_INTERVAL_MOVING_MS : NAV_CAMERA_MIN_INTERVAL_STATIONARY_MS;
     if (!force && (nowTs - lastMyLocCenterTs) < minInterval && !needCenter) {
-      _updateNorthBadge();
+      window.CMUI && window.CMUI.updateNorthBadge(_getNorthBadgeHeadingDeg(), map);
       return;
     }
     if (!needCenter && !needBearing) {
-      _updateNorthBadge();
+      window.CMUI && window.CMUI.updateNorthBadge(_getNorthBadgeHeadingDeg(), map);
       return;
     }
 
@@ -975,7 +898,7 @@ function applyNavCameraAndBearing({ force = false, nowTs = Date.now(), accuracyM
 
     lastMyLocCenterTs = nowTs;
     lastCenteredMyLocation = { lat: lastMyLocation.lat, lng: lastMyLocation.lng };
-    _updateNorthBadge();
+    window.CMUI && window.CMUI.updateNorthBadge(_getNorthBadgeHeadingDeg(), map);
   } catch (err) {
     console.warn('applyNavCameraAndBearing failed', err);
   }

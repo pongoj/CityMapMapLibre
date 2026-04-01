@@ -261,8 +261,10 @@ window.createCityMap = function createCityMap(){
   try {
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
   } catch (_) {
-    try { map.addControl(new maplibregl.AttributionControl(), "bottom-right"); } catch (_) {}
+    try { map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right"); } catch (_) {}
   }
+
+  try { setTimeout(() => { if (window.CMUI) window.CMUI.ensureCompactAttribution(); }, 0); } catch (_) {}
 
   // v6.0.8: ha a basemap stílus hiányzó ikonokra hivatkozik, adjunk hozzá átlátszó 1x1 pixelt, hogy ne dobjon warningot
   // FONTOS: a CityMap saját (cm- prefixű) ikonokat NEM szabad itt "lenullázni",

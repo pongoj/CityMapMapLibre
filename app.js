@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.14";
+const APP_VERSION = "6.10.15";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -1872,9 +1872,11 @@ function registerSW() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("online", checkForUpdateOnline);
-  document.getElementById("appVersion").textContent = "v" + APP_VERSION;
-  _updateLocationSourceBadge();
-  _updateNorthBadge();
+  if (window.CMUI) {
+    window.CMUI.initStatusBar(APP_VERSION);
+    window.CMUI.updateLocationSourceBadge("?", NaN);
+    window.CMUI.updateNorthBadge(NaN, null);
+  }
   registerSW();
   checkForUpdateOnline();
 
@@ -1899,9 +1901,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // A "Saját helyem" gomb visszakapcsolja.
   map.on("dragstart", (e) => { if (e && e.originalEvent) myLocFollowEnabled = false; });
   map.on("zoomstart", (e) => { if (e && e.originalEvent) myLocFollowEnabled = false; });
-  map.on("moveend", () => { updateMyLocFabVisibility(); _updateNorthBadge(); });
-  map.on("zoomend", () => { updateMyLocFabVisibility(); _updateNorthBadge(); });
-  map.on("rotate", () => _updateNorthBadge());
+  map.on("moveend", () => { updateMyLocFabVisibility(); if (window.CMUI && typeof _getNorthBadgeHeadingDeg === 'function') window.CMUI.updateNorthBadge(_getNorthBadgeHeadingDeg(), map); });
+  map.on("zoomend", () => { updateMyLocFabVisibility(); if (window.CMUI && typeof _getNorthBadgeHeadingDeg === 'function') window.CMUI.updateNorthBadge(_getNorthBadgeHeadingDeg(), map); });
+  map.on("rotate", () => { if (window.CMUI && typeof _getNorthBadgeHeadingDeg === 'function') window.CMUI.updateNorthBadge(_getNorthBadgeHeadingDeg(), map); });
 
 
   await DB.init();
