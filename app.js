@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.12";
+const APP_VERSION = "6.10.13";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
@@ -2037,7 +2037,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         filter: ["==", ["get", "class"], "town"],
         layout: {
           "text-field": ["coalesce", ["get", "name"], ["get", "name_int"]],
-          "text-font": ["Noto Sans Bold"],
+          "text-font": ["Noto Sans Medium"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 8, 12, 13, 18],
           "text-letter-spacing": 0.02
         },
