@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.18";
+const APP_VERSION = "6.10.19";
 
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){

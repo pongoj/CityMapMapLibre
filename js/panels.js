@@ -49,11 +49,7 @@ let map;
 let pendingLatLng = null;
 
 // Objektum módosítás (markerModal újrafelhasználása)
-let markerModalMode = "add";
-  const tb = document.getElementById('fTypeBtn'); if (tb) tb.disabled = false;
-  const sb = document.getElementById('fStatusBtn'); if (sb) sb.disabled = false;
-  setPickerValue('type', null);
-  setPickerValue('status', null); // "add" | "edit"
+let markerModalMode = "add"; // "add" | "edit"
 let editingMarkerId = null;
 let editingMarkerUuid = null;
 
