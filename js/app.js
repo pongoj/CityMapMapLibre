@@ -1,4 +1,4 @@
-const APP_VERSION = "6.10.21";
+const APP_VERSION = "6.10.22";
 
 function registerSW() {
   if (!("serviceWorker" in navigator)) return;

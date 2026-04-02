@@ -1,5 +1,3 @@
-const APP_VERSION = "6.10.20";
-
 /* === CityMap MapLibre adapter (Map NÉLKÜL) === */
 (function(){
   if (window.CM) return;
